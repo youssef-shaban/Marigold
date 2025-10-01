@@ -53,6 +53,7 @@ from .oasis_dataset import OasisNormalsDataset
 from .scannet_dataset import ScanNetDepthDataset, ScanNetNormalsDataset
 from .sintel_dataset import SintelNormalsDataset
 from .vkitti_dataset import VirtualKITTIDepthDataset
+from .aim2pc_dataset import AIM2PCNormalsDataset
 
 dataset_name_class_dict = {
     "hypersim_depth": HypersimDepthDataset,
@@ -72,6 +73,7 @@ dataset_name_class_dict = {
     "oasis_normals": OasisNormalsDataset,
     "interiorverse_iid": InteriorVerseIIDDataset,
     "hypersim_iid": HypersimIIDDataset,
+    "aim2pc_normals": AIM2PCNormalsDataset,
 }
 
 

@@ -1,6 +1,7 @@
 
 # ignore these folders
 /checkpoint
+/checkpoints
 /data
 /input
 /output
@@ -8,11 +9,12 @@
 /wandb
 /venv
 /cache
+/.cache
 
 **/.ipynb_checkpoints/
 .vscode/
 .idea
-
+.env
 # ignore these types
 *.pyc
 *.out

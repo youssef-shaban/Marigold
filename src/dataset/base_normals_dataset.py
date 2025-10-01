@@ -122,8 +122,8 @@ class BaseNormalsDataset(Dataset):
         rgb_norm = rgb / 255.0 * 2.0 - 1.0  #  [0, 255] -> [-1, 1]
 
         outputs = {
-            "rgb_int": torch.from_numpy(rgb).int(),
-            "rgb_norm": torch.from_numpy(rgb_norm).float(),
+            "rgb_int": torch.from_numpy(rgb).int().clone(),
+            "rgb_norm": torch.from_numpy(rgb_norm).float().clone(),
         }
         return outputs
 
@@ -131,7 +131,7 @@ class BaseNormalsDataset(Dataset):
         outputs = {}
         normals = torch.from_numpy(
             self._read_normals_file(normals_rel_path)
-        ).float()  # [3,H,W]
+        ).float().clone()  # [3,H,W] ensure standalone, resizable storage
         outputs["normals"] = normals
 
         return outputs

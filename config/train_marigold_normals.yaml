@@ -13,7 +13,6 @@ pipeline:
     default_processing_resolution: 768
 
 augmentation:
-  lr_flip_p: 0.5
   color_jitter_p: 0.3
   gaussian_blur_p: 0.3
   motion_blur_p: 0.3
@@ -28,7 +27,7 @@ augmentation:
 dataloader:
   num_workers: 2
   effective_batch_size: 32
-  max_train_batch_size: 2
+  max_train_batch_size: 1
   seed: 2024  # to ensure continuity when resuming from checkpoint
 
 trainer:
