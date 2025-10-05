@@ -4,9 +4,7 @@ import os
 import sys
 import random
 import pathlib
-import numpy as np
 from typing import List, Tuple, Dict
-from PIL import Image
 from tqdm import tqdm
 
 
@@ -29,19 +27,6 @@ def build_stem_to_relpath_map(files: List[str], rel_root: str) -> Dict[str, str]
     return mapping
 
 
-def convert_normal_png_to_npy(png_path: str, npy_path: str) -> None:
-    image = Image.open(png_path).convert("RGB")
-    arr_uint8 = np.asarray(image)
-    arr_float = arr_uint8.astype(np.float32) / 255.0 * 2.0 - 1.0
-    normals_chw = np.transpose(arr_float, (2, 0, 1))
-    norm = np.linalg.norm(normals_chw, axis=0, keepdims=True)
-    norm = np.maximum(norm, 1e-6)
-    normals_chw = normals_chw / norm
-    normals_hwc = np.transpose(normals_chw, (1, 2, 0))
-    os.makedirs(os.path.dirname(npy_path), exist_ok=True)
-    np.save(npy_path, normals_hwc)
-
-
 def write_split_file(pairs: List[Tuple[str, str]], save_path: str) -> None:
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with open(save_path, "w") as f:
@@ -51,13 +36,13 @@ def write_split_file(pairs: List[Tuple[str, str]], save_path: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Prepare normals dataset: convert target PNG normals to NPY and create data_split files."
+        description="Prepare normals dataset: match RGB and NPY normals pairs and create data_split files."
     )
     parser.add_argument(
         "--dataset_root",
         type=str,
         required=True,
-        help="Root directory containing 'input/' (RGB) and 'target/' (normal PNGs).",
+        help="Root directory containing 'input/' (RGB) and 'target/' (normal NPY files).",
     )
     parser.add_argument(
         "--input_subdir",
@@ -68,14 +53,8 @@ def main():
     parser.add_argument(
         "--target_subdir",
         type=str,
-        default="target",
-        help="Subdirectory name under dataset_root for normal images (PNG). Default: target",
-    )
-    parser.add_argument(
-        "--output_normals_subdir",
-        type=str,
-        default="normals_npy",
-        help="Subdirectory under dataset_root to write converted NPY normals. Default: normals_npy",
+        default="target_npy",
+        help="Subdirectory name under dataset_root for normal NPY files. Default: target",
     )
     parser.add_argument(
         "--output_split_dir",
@@ -110,8 +89,8 @@ def main():
     parser.add_argument(
         "--normal_exts",
         type=str,
-        default=".png",
-        help="Comma-separated list of normal image extensions to convert. Default: .png",
+        default=".npy",
+        help="Comma-separated list of normal file extensions. Default: .npy",
     )
 
     args = parser.parse_args()
@@ -119,7 +98,6 @@ def main():
     dataset_root = os.path.abspath(args.dataset_root)
     input_dir = os.path.join(dataset_root, args.input_subdir)
     target_dir = os.path.join(dataset_root, args.target_subdir)
-    output_normals_dir = os.path.join(dataset_root, args.output_normals_subdir)
 
     if not os.path.isdir(input_dir):
         print(f"Error: Input directory does not exist: {input_dir}", file=sys.stderr)
@@ -146,33 +124,22 @@ def main():
         print("Error: No matching pairs found between input and target.", file=sys.stderr)
         sys.exit(1)
 
-    converted_pairs: List[Tuple[str, str]] = []
-    for stem in tqdm(common_stems, desc="Converting normals to NPY"):
+    pairs: List[Tuple[str, str]] = []
+    for stem in tqdm(common_stems, desc="Building pairs"):
         rgb_rel = os.path.join(args.input_subdir, rgb_map[stem]).replace(os.sep, "/")
-        normal_png_rel = normal_map[stem]
-        normal_png_abs = os.path.join(target_dir, normal_png_rel)
-        npy_rel_under_output = pathlib.Path(normal_png_rel).with_suffix(".npy").as_posix()
-        normal_npy_rel = os.path.join(args.output_normals_subdir, npy_rel_under_output).replace(os.sep, "/")
-        normal_npy_abs = os.path.join(output_normals_dir, npy_rel_under_output)
-
-        try:
-            convert_normal_png_to_npy(normal_png_abs, normal_npy_abs)
-            converted_pairs.append((rgb_rel, normal_npy_rel))
-        except Exception as e:
-            bad_name = os.path.basename(normal_png_abs)
-            print(f"Error converting normal '{bad_name}': {e}. Skipping.", file=sys.stderr)
-            continue
+        normal_rel = os.path.join(args.target_subdir, normal_map[stem]).replace(os.sep, "/")
+        pairs.append((rgb_rel, normal_rel))
 
     random.seed(args.seed)
-    random.shuffle(converted_pairs)
+    random.shuffle(pairs)
 
-    n_total = len(converted_pairs)
+    n_total = len(pairs)
     n_test = int(n_total * args.test_ratio)
     n_val = int(n_total * args.val_ratio)
 
-    test_pairs = converted_pairs[:n_test]
-    val_pairs = converted_pairs[n_test : n_test + n_val]
-    train_pairs = converted_pairs[n_test + n_val :]
+    test_pairs = pairs[:n_test]
+    val_pairs = pairs[n_test : n_test + n_val]
+    train_pairs = pairs[n_test + n_val :]
 
     write_split_file(train_pairs, os.path.join(args.output_split_dir, "train.txt"))
     write_split_file(val_pairs, os.path.join(args.output_split_dir, "val.txt"))
@@ -189,7 +156,6 @@ def main():
     if n_vis > 0:
         print(f"Visualization subset: {n_vis} samples written to vis.txt")
     print(f"Split files written to: {os.path.abspath(args.output_split_dir)}")
-    print(f"Converted NPY normals written under: {output_normals_dir}")
 
 
 if __name__ == "__main__":
