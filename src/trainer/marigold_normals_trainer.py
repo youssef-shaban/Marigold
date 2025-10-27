@@ -44,6 +44,7 @@ from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from typing import List, Union
+from safetensors.torch import load_file
 
 from marigold.marigold_normals_pipeline import (
     MarigoldNormalsPipeline,
@@ -632,9 +633,9 @@ class MarigoldNormalsTrainer:
     ):
         logging.info(f"Loading checkpoint from: {ckpt_path}")
         # Load UNet
-        _model_path = os.path.join(ckpt_path, "unet", "diffusion_pytorch_model.bin")
+        _model_path = os.path.join(ckpt_path, "unet", "diffusion_pytorch_model.safetensors")
         self.model.unet.load_state_dict(
-            torch.load(_model_path, map_location=self.device)
+            load_file(_model_path)
         )
         self.model.unet.to(self.device)
         logging.info(f"UNet parameters are loaded from {_model_path}")

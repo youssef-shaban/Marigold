@@ -5,6 +5,7 @@ import sys
 import random
 import pathlib
 from typing import List, Tuple, Dict
+from collections import defaultdict
 from tqdm import tqdm
 
 
@@ -25,6 +26,20 @@ def build_stem_to_relpath_map(files: List[str], rel_root: str) -> Dict[str, str]
         stem = pathlib.Path(rel_path).with_suffix("").as_posix()
         mapping[stem] = rel_path.replace(os.sep, "/")
     return mapping
+
+
+def extract_sample_name(stem: str) -> str:
+    """
+    Extract the sample name from a stem like 'input/3192_010'.
+    For files named {sample_name}_{sample_num}.ext, returns the sample_name part.
+    """
+    basename = os.path.basename(stem)
+    # Split by underscore and take all parts except the last one
+    parts = basename.rsplit('_', 1)
+    if len(parts) == 2:
+        return parts[0]
+    # If no underscore, return the whole basename
+    return basename
 
 
 def write_split_file(pairs: List[Tuple[str, str]], save_path: str) -> None:
@@ -124,26 +139,48 @@ def main():
         print("Error: No matching pairs found between input and target.", file=sys.stderr)
         sys.exit(1)
 
-    pairs: List[Tuple[str, str]] = []
+    # Group pairs by sample name to avoid data leakage
+    # For files like "3192_010.png", group by "3192"
+    sample_groups: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
+    
     for stem in tqdm(common_stems, desc="Building pairs"):
         rgb_rel = os.path.join(args.input_subdir, rgb_map[stem]).replace(os.sep, "/")
         normal_rel = os.path.join(args.target_subdir, normal_map[stem]).replace(os.sep, "/")
-        pairs.append((rgb_rel, normal_rel))
-
+        
+        # Extract sample name (e.g., "3192" from "3192_010")
+        sample_name = extract_sample_name(stem)
+        sample_groups[sample_name].append((rgb_rel, normal_rel))
+    
+    # Get list of unique sample names and shuffle them
+    sample_names = sorted(sample_groups.keys())
     random.seed(args.seed)
-    random.shuffle(pairs)
-
-    n_total = len(pairs)
-    n_test = int(n_total * args.test_ratio)
-    n_val = int(n_total * args.val_ratio)
-
-    test_pairs = pairs[:n_test]
-    val_pairs = pairs[n_test : n_test + n_val]
-    train_pairs = pairs[n_test + n_val :]
+    random.shuffle(sample_names)
+    
+    # Split by sample names (not individual pairs) to avoid data leakage
+    n_samples = len(sample_names)
+    n_test_samples = int(n_samples * args.test_ratio)
+    n_val_samples = int(n_samples * args.val_ratio)
+    
+    test_sample_names = sample_names[:n_test_samples]
+    val_sample_names = sample_names[n_test_samples : n_test_samples + n_val_samples]
+    train_sample_names = sample_names[n_test_samples + n_val_samples :]
+    
+    # Collect all pairs for each split
+    test_pairs = []
+    for sample_name in test_sample_names:
+        test_pairs.extend(sample_groups[sample_name])
+    
+    val_pairs = []
+    for sample_name in val_sample_names:
+        val_pairs.extend(sample_groups[sample_name])
+    
+    train_pairs = []
+    for sample_name in train_sample_names:
+        train_pairs.extend(sample_groups[sample_name])
 
     write_split_file(train_pairs, os.path.join(args.output_split_dir, "train.txt"))
     write_split_file(val_pairs, os.path.join(args.output_split_dir, "val.txt"))
-    if n_test > 0:
+    if len(test_pairs) > 0:
         write_split_file(test_pairs, os.path.join(args.output_split_dir, "test.txt"))
 
     # Visualization subset from validation
@@ -152,10 +189,15 @@ def main():
         vis_pairs = random.sample(val_pairs, n_vis)
         write_split_file(vis_pairs, os.path.join(args.output_split_dir, "vis.txt"))
 
-    print(f"Done. Total pairs: {n_total}; train: {len(train_pairs)}, val: {len(val_pairs)}, test: {len(test_pairs)}")
+    n_total_pairs = len(train_pairs) + len(val_pairs) + len(test_pairs)
+    print(f"\nDone!")
+    print(f"Unique samples: {n_samples} (train: {len(train_sample_names)}, val: {len(val_sample_names)}, test: {len(test_sample_names)})")
+    print(f"Total pairs: {n_total_pairs} (train: {len(train_pairs)}, val: {len(val_pairs)}, test: {len(test_pairs)})")
+    print(f"Average variations per sample: {n_total_pairs / n_samples:.2f}")
     if n_vis > 0:
         print(f"Visualization subset: {n_vis} samples written to vis.txt")
     print(f"Split files written to: {os.path.abspath(args.output_split_dir)}")
+    print(f"\nNote: Samples with same name (e.g., '3192_010' and '3192_005') are kept in the same split to prevent data leakage.")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ RUN apt-get update && \
         git \
         ffmpeg \
         libgl1 \
+        rsync \
         libglib2.0-0 \
         ca-certificates \
         && rm -rf /var/lib/apt/lists/*
