@@ -56,17 +56,17 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         self.rasterizer_oblique = None
         
         # LRU mesh cache with maximum size to prevent memory leaks
-        # With 16 workers, limit each worker to ~50 meshes (adjust based on mesh size)
+        # Cache meshes on CPU to avoid GPU memory issues, only move to GPU for rendering
+        # With 16 workers, limit each worker to ~20 meshes to be conservative
         self.mesh_cache = OrderedDict()
-        self.max_cache_size = 50  # Maximum number of meshes to cache per worker
+        self.max_cache_size = 20  # Maximum number of meshes to cache per worker (on CPU)
 
 
     def _ensure_rasterizer(self):
-        """Lazy initialization of rasterizer per worker on CPU to avoid GPU memory conflicts."""
+        """Lazy initialization of rasterizer per worker with GPU acceleration."""
         if self.rasterizer_oblique is None:
-            # Use CPU for rendering to avoid GPU memory conflicts with training
-            # With 16 workers on CPU, this is still much faster than original setup
-            device = torch.device('cpu')
+            # Use GPU for fast rendering, but we'll be careful with memory management
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             cam_oblique = OrthographicCameras(
                 R=self.R2.to(device), 
                 T=self.T2.to(device), 
@@ -123,46 +123,53 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         # Ensure rasterizer is initialized for this worker
         self._ensure_rasterizer()
         
-        # Get device from rasterizer
-        device = self.rasterizer_oblique.cameras.device
+        # Get GPU device from rasterizer (for rendering only)
+        gpu_device = self.rasterizer_oblique.cameras.device
         
-        # Load mesh from cache or disk with LRU eviction
+        # Load mesh from cache (CPU) or disk with LRU eviction
+        # KEY OPTIMIZATION: Cache on CPU to save GPU memory
         if mesh_path in self.mesh_cache:
             # Move to end to mark as recently used
             self.mesh_cache.move_to_end(mesh_path)
-            mesh = self.mesh_cache[mesh_path]
+            mesh_cpu = self.mesh_cache[mesh_path]
         else:
-            # Load new mesh
-            mesh = load_objs_as_meshes([str(mesh_path)], load_textures=False, device=device)
-            mesh = self._prepare_mesh(mesh)
+            # Load new mesh to CPU
+            mesh_cpu = load_objs_as_meshes([str(mesh_path)], load_textures=False, device='cpu')
+            mesh_cpu = self._prepare_mesh(mesh_cpu)
             
-            # Add to cache
-            self.mesh_cache[mesh_path] = mesh
+            # Add to cache (on CPU)
+            self.mesh_cache[mesh_path] = mesh_cpu
             
             # Evict oldest if cache is full
             if len(self.mesh_cache) > self.max_cache_size:
                 oldest_key = next(iter(self.mesh_cache))
                 del self.mesh_cache[oldest_key]
         
-        transform = RotateAxisAngle(angle_deg, axis="Y", degrees=True, device=device)
-
-        # verts_padded returns shape (N, V, 3). We keep batch dimension.
-        verts = mesh.verts_padded()
+        # Move mesh to GPU only for rendering
+        mesh_gpu = mesh_cpu.to(gpu_device)
+        
+        # Transform on GPU
+        transform = RotateAxisAngle(angle_deg, axis="Y", degrees=True, device=gpu_device)
+        verts = mesh_gpu.verts_padded()
         verts_rot = transform.transform_points(verts)
 
         mesh_rot = Meshes(
             verts=[verts_rot[0]],  # remove batch dim for constructor
-            faces=mesh.faces_list(),
-            textures=mesh.textures,
+            faces=mesh_gpu.faces_list(),
+            textures=mesh_gpu.textures,
         )
 
-        # Render normals
+        # Render normals on GPU
         fragments_oblique = self.rasterizer_oblique(mesh_rot)
         normals_oblique = self._normal_map_normalized(mesh_rot, fragments_oblique)
         normals_oblique = np.transpose(normals_oblique, (2, 0, 1))
         
-        # Clean up to free memory
-        del fragments_oblique, mesh_rot, verts_rot, transform
+        # Aggressive cleanup to free GPU memory immediately
+        del fragments_oblique, mesh_rot, verts_rot, transform, mesh_gpu, verts
+        
+        # Clear GPU cache to prevent accumulation
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         return {"normals": torch.from_numpy(normals_oblique).float()}
 
@@ -220,3 +227,7 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         # Clean up rasterizer
         if hasattr(self, 'rasterizer_oblique') and self.rasterizer_oblique is not None:
             self.rasterizer_oblique = None
+        
+        # Clear GPU cache if available
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
