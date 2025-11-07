@@ -15,8 +15,7 @@ pip uninstall -y transformers diffusers
 pip install transformers==4.49 diffusers==0.32.2
 
 python script/normals/train.py \
-##      --resume_run "$CKPT_PATH" \
         --base_data_dir /data \
         --base_ckpt_dir /ckpt \
         --output_dir /work/out \
-        --do_not_copy_data  
+        --add_datetime_prefix --do_not_copy_data 

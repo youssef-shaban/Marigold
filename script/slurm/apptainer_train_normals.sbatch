@@ -3,6 +3,8 @@
 #SBATCH --partition=gen-part
 #SBATCH --qos=gpu1-32h
 #SBATCH --gpus=1
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=128G
 #SBATCH --output=%x-%j.out
 
 # Paths you may need to adjust
@@ -10,7 +12,7 @@ IMAGE_DIR=/projects/pointclouds/images
 IMAGE_PATH=ykorny/marigold-normals:latest
 SCRIPT_PATH=/projects/pointclouds/Marigold/script/slurm/
 SIF=$IMAGE_DIR/marigold-normals.sif
-DATA_DIR=/projects/pointclouds/rendered_meshes/
+DATA_DIR=/projects/pointclouds/house_dataset/
 CKPT_DIR=/projects/pointclouds/ckpt
 OUT_DIR=/projects/pointclouds/output
 CODE_DIR=/projects/pointclouds/Marigold

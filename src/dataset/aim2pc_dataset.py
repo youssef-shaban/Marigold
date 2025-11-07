@@ -16,6 +16,7 @@ from pytorch3d.renderer import (
 
 from pytorch3d.transforms import RotateAxisAngle
 import torch.nn.functional as F
+from torch.utils.data import get_worker_info
 
 
 class AIM2PCNormalsDataset(BaseNormalsDataset):
@@ -40,15 +41,36 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
             **kwargs,
         )
         self.filenames = [f for f in os.listdir(os.path.join(self.dataset_dir, "image")) if f.endswith(".jpg")]
-        raster_settings = RasterizationSettings(
+        
+        # Store rasterizer settings for lazy initialization per worker
+        self.raster_settings = RasterizationSettings(
             image_size=(self.resize_to_hw[1], self.resize_to_hw[0]),
             blur_radius=0.0,
             faces_per_pixel=1,
         )
-        R2, T2 = look_at_view_transform(dist=2.0, elev=40, azim=180)
-        cam_oblique = OrthographicCameras( R=R2, T=T2, focal_length=0.8)
-        self.rasterizer_oblique = MeshRasterizer(cameras=cam_oblique, raster_settings=raster_settings)
+        self.R2, self.T2 = look_at_view_transform(dist=2.0, elev=40, azim=180)
+        
+        # Lazy initialization - will be created per worker
+        self.rasterizer_oblique = None
+        
+        # Mesh cache to avoid reloading from disk
+        self.mesh_cache = {}
 
+
+    def _ensure_rasterizer(self):
+        """Lazy initialization of rasterizer per worker with GPU acceleration."""
+        if self.rasterizer_oblique is None:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            cam_oblique = OrthographicCameras(
+                R=self.R2.to(device), 
+                T=self.T2.to(device), 
+                focal_length=0.8,
+                device=device
+            )
+            self.rasterizer_oblique = MeshRasterizer(
+                cameras=cam_oblique, 
+                raster_settings=self.raster_settings
+            )
 
     def _get_data_item(self, index):
         rgb_path = os.path.join(self.dataset_dir, "image", f"{self.filenames[index]}")
@@ -92,9 +114,21 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         }
 
     def _render_normals(self, mesh_path, angle_deg):
-        mesh = load_objs_as_meshes([str(mesh_path)], load_textures=False)
-        mesh = self._prepare_mesh(mesh)
-        transform = RotateAxisAngle(angle_deg, axis="Y", degrees=True)
+        # Ensure rasterizer is initialized for this worker
+        self._ensure_rasterizer()
+        
+        # Get device from rasterizer
+        device = self.rasterizer_oblique.cameras.device
+        
+        # Load mesh from cache or disk
+        if mesh_path not in self.mesh_cache:
+            mesh = load_objs_as_meshes([str(mesh_path)], load_textures=False, device=device)
+            mesh = self._prepare_mesh(mesh)
+            self.mesh_cache[mesh_path] = mesh
+        else:
+            mesh = self.mesh_cache[mesh_path]
+        
+        transform = RotateAxisAngle(angle_deg, axis="Y", degrees=True, device=device)
 
         # verts_padded returns shape (N, V, 3). We keep batch dimension.
         verts = mesh.verts_padded()
@@ -123,7 +157,7 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         verts_norm = verts_centered / scale
 
         # Apply pre-rotation around X axis to fix initial orientation if requested
-        rot = RotateAxisAngle(-90, axis="X", degrees=True)
+        rot = RotateAxisAngle(-90, axis="X", degrees=True, device=verts.device)
         verts_norm = rot.transform_points(verts_norm[None, ...])[0]
 
         mesh_rot = Meshes(verts=[verts_norm], faces=mesh.faces_list())

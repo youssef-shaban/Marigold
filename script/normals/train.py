@@ -290,6 +290,9 @@ if "__main__" == __name__:
             concat_dataset,
             batch_sampler=mixed_sampler,
             num_workers=cfg.dataloader.num_workers,
+            persistent_workers=cfg.dataloader.get('persistent_workers', False) if cfg.dataloader.num_workers > 0 else False,
+            pin_memory=cfg.dataloader.get('pin_memory', True),
+            prefetch_factor=cfg.dataloader.get('prefetch_factor', 2) if cfg.dataloader.num_workers > 0 else None,
         )
     else:
         train_loader = DataLoader(
@@ -298,6 +301,9 @@ if "__main__" == __name__:
             num_workers=cfg.dataloader.num_workers,
             shuffle=True,
             generator=loader_generator,
+            persistent_workers=cfg.dataloader.get('persistent_workers', False) if cfg.dataloader.num_workers > 0 else False,
+            pin_memory=cfg.dataloader.get('pin_memory', True),
+            prefetch_factor=cfg.dataloader.get('prefetch_factor', 2) if cfg.dataloader.num_workers > 0 else None,
         )
     # Validation dataset
     val_loaders: List[DataLoader] = []
@@ -312,6 +318,8 @@ if "__main__" == __name__:
             batch_size=1,
             shuffle=False,
             num_workers=cfg.dataloader.num_workers,
+            persistent_workers=cfg.dataloader.get('persistent_workers', False) if cfg.dataloader.num_workers > 0 else False,
+            pin_memory=cfg.dataloader.get('pin_memory', True),
         )
         val_loaders.append(_val_loader)
 
@@ -328,6 +336,8 @@ if "__main__" == __name__:
             batch_size=1,
             shuffle=False,
             num_workers=cfg.dataloader.num_workers,
+            persistent_workers=cfg.dataloader.get('persistent_workers', False) if cfg.dataloader.num_workers > 0 else False,
+            pin_memory=cfg.dataloader.get('pin_memory', True),
         )
         vis_loaders.append(_vis_loader)
 
