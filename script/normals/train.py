@@ -38,6 +38,7 @@ import logging
 import os
 import shutil
 import torch
+import torch.multiprocessing as mp
 from datetime import datetime, timedelta
 from omegaconf import OmegaConf
 from torch.utils.data import ConcatDataset, DataLoader
@@ -64,6 +65,12 @@ from src.util.slurm_util import get_local_scratch_dir, is_on_slurm
 
 
 if "__main__" == __name__:
+    # Set multiprocessing start method to 'spawn' for CUDA compatibility
+    try:
+        mp.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass  # Already set
+    
     t_start = datetime.now()
     logging.info(f"Started at {t_start}")
 
