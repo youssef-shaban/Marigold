@@ -2,8 +2,8 @@ dataset:
   vis:
   - name: aim2pc_normals
     disp_name: aim2pc_normals_vis
-    dir: .
-    filenames: data_split/aim2pc_normals/vis.txt
+    dir: ./vis
+    filenames: null
     resize_to_hw:
     - 512
     - 512

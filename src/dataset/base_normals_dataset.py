@@ -54,6 +54,7 @@ class BaseNormalsDataset(Dataset):
         filename_ls_path: str,
         dataset_dir: str,
         disp_name: str,
+        using_filenames: bool = True,
         augmentation_args: dict = None,
         resize_to_hw=None,
         **kwargs,
@@ -72,9 +73,12 @@ class BaseNormalsDataset(Dataset):
         self.augm_args = augmentation_args
         self.resize_to_hw = resize_to_hw
 
-        # Load filenames
-        with open(self.filename_ls_path, "r") as f:
-            self.filenames = [s.split() for s in f.readlines()]
+        if using_filenames:
+            # Load filenames
+            with open(self.filename_ls_path, "r") as f:
+                self.filenames = [s.split() for s in f.readlines()]
+        else:
+            self.filenames = []
 
         # Tar dataset
         self.tar_obj = None

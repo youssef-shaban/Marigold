@@ -12,4 +12,3 @@ python script/normals/train.py \
         --base_data_dir /data \
         --base_ckpt_dir /ckpt \
         --output_dir /work/out \
-        --add_datetime_prefix

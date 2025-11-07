@@ -2,8 +2,8 @@ dataset:
   train:
     name: aim2pc_normals
     disp_name: aim2pc_normals_train
-    dir: .
-    filenames: data_split/aim2pc_normals/train.txt
+    dir: ./train
+    filenames: null
     resize_to_hw:
     - 512
     - 512
