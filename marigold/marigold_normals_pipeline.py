@@ -149,6 +149,7 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
         generator: Union[torch.Generator, None] = None,
         show_progress_bar: bool = True,
         ensemble_kwargs: Dict = None,
+        aspect_ratio: Optional[Union[float, torch.Tensor]] = None,
     ) -> MarigoldNormalsOutput:
         """
         Function invoked when calling the pipeline.
@@ -180,6 +181,8 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
                 Display a progress bar of diffusion denoising.
             ensemble_kwargs (`dict`, *optional*, defaults to `None`):
                 Arguments for detailed ensembling settings.
+            aspect_ratio (`float` or `torch.Tensor`, *optional*, defaults to `None`):
+                Aspect ratio conditioning value(s). Accepts scalar, `[B]`, or `[B, 1]` tensors and is broadcast as needed.
         Returns:
             `MarigoldNormalsOutput`: Output class for Marigold monocular surface normals estimation pipeline, including:
             - **normals_np** (`np.ndarray`) Predicted normals map of shape [3, H, W] with values in the range of [-1, 1]
@@ -231,10 +234,19 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
         rgb_norm = rgb_norm.to(self.dtype)
         assert rgb_norm.min() >= -1.0 and rgb_norm.max() <= 1.0
 
+        # Aspect ratio conditioning
+        aspect_ratio_tensor = self._prepare_aspect_ratio_input(
+            aspect_ratio, batch_size=rgb_norm.shape[0], device=rgb_norm.device
+        )
+
         # ----------------- Predicting normals -----------------
         # Batch repeated input image
         duplicated_rgb = rgb_norm.expand(ensemble_size, -1, -1, -1)
-        single_rgb_dataset = TensorDataset(duplicated_rgb)
+        if aspect_ratio_tensor is not None:
+            duplicated_aspect_ratio = aspect_ratio_tensor.expand(ensemble_size, -1)
+            single_rgb_dataset = TensorDataset(duplicated_rgb, duplicated_aspect_ratio)
+        else:
+            single_rgb_dataset = TensorDataset(duplicated_rgb)
         if batch_size > 0:
             _bs = batch_size
         else:
@@ -257,12 +269,17 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
         else:
             iterable = single_rgb_loader
         for batch in iterable:
-            (batched_img,) = batch
+            if aspect_ratio_tensor is not None:
+                batched_img, batched_aspect_ratio = batch
+            else:
+                (batched_img,) = batch
+                batched_aspect_ratio = None
             target_pred_raw = self.single_infer(
                 rgb_in=batched_img,
                 num_inference_steps=denoising_steps,
                 show_pbar=show_progress_bar,
                 generator=generator,
+                aspect_ratio=batched_aspect_ratio,
             )
             target_pred_ls.append(target_pred_raw.detach())
         target_preds = torch.concat(target_pred_ls, dim=0)
@@ -343,6 +360,35 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
         else:
             raise RuntimeError(f"Unsupported scheduler type: {type(self.scheduler)}")
 
+    @staticmethod
+    def _prepare_aspect_ratio_input(aspect_ratio, batch_size, device):
+        if aspect_ratio is None:
+            return None
+
+        if not torch.is_tensor(aspect_ratio):
+            aspect_ratio = torch.tensor(aspect_ratio, dtype=torch.float32, device=device)
+        else:
+            aspect_ratio = aspect_ratio.to(device=device, dtype=torch.float32)
+
+        if aspect_ratio.dim() == 2 and aspect_ratio.size(-1) == 1:
+            if aspect_ratio.size(0) == 1 and batch_size > 1:
+                aspect_ratio = aspect_ratio.repeat(batch_size, 1)
+            elif aspect_ratio.size(0) != batch_size:
+                raise ValueError(
+                    f"Aspect ratio batch dimension {aspect_ratio.size(0)} does not match batch size {batch_size}."
+                )
+            return aspect_ratio
+
+        aspect_ratio = aspect_ratio.reshape(-1)
+        if aspect_ratio.numel() == 1 and batch_size > 1:
+            aspect_ratio = aspect_ratio.repeat(batch_size)
+        if aspect_ratio.numel() != batch_size:
+            raise ValueError(
+                f"Aspect ratio tensor must contain {batch_size} values; got {aspect_ratio.numel()}."
+            )
+
+        return aspect_ratio.unsqueeze(-1)
+
     def encode_empty_text(self):
         """
         Encode text embedding for empty prompt
@@ -365,6 +411,7 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
         num_inference_steps: int,
         generator: Union[torch.Generator, None],
         show_pbar: bool,
+        aspect_ratio: Optional[Union[float, torch.Tensor]] = None,
     ) -> torch.Tensor:
         """
         Perform a single prediction without ensembling.
@@ -378,11 +425,16 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
                 Display a progress bar of diffusion denoising.
             generator (`torch.Generator`)
                 Random generator for initial noise generation.
+            aspect_ratio (`float` or `torch.Tensor`, *optional*):
+                Aspect ratio conditioning value(s) for the current batch.
         Returns:
             `torch.Tensor`: Predicted targets.
         """
         device = self.device
         rgb_in = rgb_in.to(device)
+        aspect_ratio = self._prepare_aspect_ratio_input(
+            aspect_ratio, batch_size=rgb_in.shape[0], device=device
+        )
 
         # Set timesteps
         self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -424,7 +476,10 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
 
             # predict the noise residual
             noise_pred = self.unet(
-                unet_input, t, encoder_hidden_states=batch_empty_text_embed
+                unet_input,
+                t,
+                encoder_hidden_states=batch_empty_text_embed,
+                class_labels=aspect_ratio,
             ).sample  # [B, 4, h, w]
 
             # compute the previous noisy sample x_t -> x_t-1

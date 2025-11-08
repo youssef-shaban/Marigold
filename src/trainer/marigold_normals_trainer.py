@@ -59,6 +59,7 @@ from src.util.lr_scheduler import IterExponential
 from src.util.metric import MetricTracker, compute_cosine_error
 from src.util.multi_res_noise import multi_res_noise_like
 from src.util.seeding import generate_seed_sequence
+from src.util.aspect_ratio_embedding import AspectRatioEmbedding
 
 
 class MarigoldNormalsTrainer:
@@ -92,6 +93,8 @@ class MarigoldNormalsTrainer:
         # Adapt input layers
         if 8 != self.model.unet.config["in_channels"]:
             self._replace_unet_conv_in()
+
+        self._inject_aspect_ratio_embedding()
 
         # Encode empty text prompt
         self.model.encode_empty_text()
@@ -209,6 +212,63 @@ class MarigoldNormalsTrainer:
         logging.info("Unet config is updated")
         return
 
+    def _inject_aspect_ratio_embedding(self):
+        unet = self.model.unet
+        class_embedding = getattr(unet, "class_embedding", None)
+
+        if class_embedding is not None:
+            if isinstance(class_embedding, AspectRatioEmbedding):
+                return
+            logging.info(
+                "Existing UNet class_embedding is not AspectRatioEmbedding; replacing it."
+            )
+
+        time_embedding = getattr(unet, "time_embedding", None)
+        if time_embedding is None or not hasattr(time_embedding, "linear_1"):
+            raise AttributeError(
+                "UNet time_embedding.linear_1 is required to infer timestep embedding dimension."
+            )
+
+        timestep_emb_dim = time_embedding.linear_1.out_features
+        device = time_embedding.linear_1.weight.device
+
+        aspect_ratio_embedding = AspectRatioEmbedding(
+            timestep_emb_dim=timestep_emb_dim
+        ).to(device)
+        unet.class_embedding = aspect_ratio_embedding
+        logging.info("Aspect ratio embedding injected into UNet.")
+
+    @staticmethod
+    def _prepare_aspect_ratio_input(aspect_ratio, batch_size, device):
+        if aspect_ratio is None:
+            return None
+
+        if not torch.is_tensor(aspect_ratio):
+            aspect_ratio = torch.tensor(aspect_ratio, dtype=torch.float32, device=device)
+        else:
+            aspect_ratio = aspect_ratio.to(device=device, dtype=torch.float32)
+
+        # Handle [B, 1] inputs directly
+        if aspect_ratio.dim() == 2 and aspect_ratio.size(-1) == 1:
+            if aspect_ratio.size(0) == 1 and batch_size > 1:
+                aspect_ratio = aspect_ratio.repeat(batch_size, 1)
+            elif aspect_ratio.size(0) != batch_size:
+                raise ValueError(
+                    f"Aspect ratio batch dimension {aspect_ratio.size(0)} does not match batch size {batch_size}."
+                )
+            return aspect_ratio
+
+        # Flatten to [B]
+        aspect_ratio = aspect_ratio.reshape(-1)
+        if aspect_ratio.numel() == 1 and batch_size > 1:
+            aspect_ratio = aspect_ratio.repeat(batch_size)
+        if aspect_ratio.numel() != batch_size:
+            raise ValueError(
+                f"Aspect ratio tensor must contain {batch_size} values; got {aspect_ratio.numel()}."
+            )
+
+        return aspect_ratio.unsqueeze(-1)
+
     def train(self, t_end=None):
         logging.info("Start training")
 
@@ -255,6 +315,12 @@ class MarigoldNormalsTrainer:
                     valid_mask_down = valid_mask_down.repeat((1, 4, 1, 1))
 
                 batch_size = rgb.shape[0]
+                aspect_ratio = (
+                    batch["orig_aspect_ratio"] if "orig_aspect_ratio" in batch else None
+                )
+                aspect_ratio = self._prepare_aspect_ratio_input(
+                    aspect_ratio, batch_size, device
+                )
 
                 with torch.no_grad():
                     # Encode image
@@ -311,7 +377,7 @@ class MarigoldNormalsTrainer:
 
                 # Predict the noise residual
                 model_pred = self.model.unet(
-                    cat_latents, timesteps, text_embed
+                    cat_latents, timesteps, text_embed, class_labels=aspect_ratio
                 ).sample  # [B, 4, h, w]
                 if torch.isnan(model_pred).any():
                     logging.warning("model_pred contains NaN.")
@@ -528,6 +594,13 @@ class MarigoldNormalsTrainer:
                 generator = torch.Generator(device=self.device)
                 generator.manual_seed(seed)
 
+            aspect_ratio = (
+                batch["orig_aspect_ratio"] if "orig_aspect_ratio" in batch else None
+            )
+            aspect_ratio = self._prepare_aspect_ratio_input(
+                aspect_ratio, batch_size=1, device=self.device
+            )
+
             # Predict normals
             pipe_out: MarigoldNormalsOutput = self.model(
                 rgb_int,
@@ -539,6 +612,7 @@ class MarigoldNormalsTrainer:
                 batch_size=1,  # use batch size 1 to increase reproducibility
                 show_progress_bar=False,
                 resample_method=self.cfg.validation.resample_method,
+                aspect_ratio=aspect_ratio,
             )
 
             normals_pred = pipe_out.normals_np  # [3, H, W]
