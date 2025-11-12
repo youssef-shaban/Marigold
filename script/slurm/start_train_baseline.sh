@@ -14,6 +14,11 @@ rm -rf /tmp/Marigold_data/
 pip uninstall -y transformers diffusers
 pip install transformers==4.49 diffusers==0.32.2 timm==0.9.16
 
+export HF_HOME=/work/out/hf_cache
+export HF_HUB_CACHE=/work/out/hf_cache
+export HUGGINGFACE_HUB_CACHE=/work/out/hf_cache
+mkdir -p "$HF_HOME"
+
 python script/baseline/train.py \
         --base_data_dir /data \
         --output_dir /work/out \

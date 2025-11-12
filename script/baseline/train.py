@@ -45,6 +45,19 @@ from torch.utils.data import ConcatDataset, DataLoader
 from tqdm import tqdm
 from typing import List, Union
 
+DEFAULT_HF_CACHE = os.environ.get(
+    "HF_CACHE_DIR",
+    os.path.abspath(os.path.join(os.getcwd(), "hf_cache")),
+)
+
+for _env_name in ("HF_HOME", "HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"):
+    os.environ.setdefault(_env_name, DEFAULT_HF_CACHE)
+
+try:
+    os.makedirs(os.environ["HF_HOME"], exist_ok=True)
+except Exception:
+    pass
+
 from marigold.baseline_normals_pipeline import BaselineNormalsPipeline
 from src.dataset import BaseNormalsDataset, DatasetMode, get_dataset
 from src.dataset.mixed_sampler import MixedBatchSampler
