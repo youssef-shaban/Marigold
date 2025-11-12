@@ -22,16 +22,18 @@ from collections import OrderedDict
 
 
 class AIM2PCNormalsDataset(BaseNormalsDataset):
-    def __init__(self, 
-    mode: DatasetMode,
-    dataset_dir: str,
-    disp_name: str,
-    filename_ls_path: str = "",
-    using_filenames: bool = False,
-    augmentation_args: dict = None,
-    resize_to_hw=None,
-    **kwargs,
+    def __init__(
+        self,
+        mode: DatasetMode,
+        dataset_dir: str,
+        disp_name: str,
+        filename_ls_path: str = "",
+        using_filenames: bool = False,
+        augmentation_args: dict = None,
+        resize_to_hw=None,
+        **kwargs,
     ) -> None:
+        self.apply_random_orientation = kwargs.pop("apply_random_orientation", True)
         super().__init__(
             mode=mode,
             filename_ls_path=filename_ls_path,
@@ -83,7 +85,7 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         mesh_path = os.path.join(self.dataset_dir, "mesh", f"{self.filenames[index].replace('.jpg', '.obj')}")
         mask_path = os.path.join(self.dataset_dir, "roof_intuitive_mask", f"{self.filenames[index]}")
         
-        angle_deg = random.uniform(0, 180)
+        angle_deg = random.uniform(0, 180) if self.apply_random_orientation else 0.0
         rasters = {}
 
         rasters.update(self._load_rgb_data(rgb_path, mask_path, angle_deg if DatasetMode.RGB_ONLY != self.mode else 0.0))
@@ -106,10 +108,12 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         rgb[mask < 120] = 0
         masked_rgb = Image.fromarray(rgb, mode="RGB")
         rgb_resized = masked_rgb.resize(self.resize_to_hw)
-        if DatasetMode.RGB_ONLY != self.mode:
+        if self.apply_random_orientation and DatasetMode.RGB_ONLY != self.mode:
             rgb_fliped = rgb_resized.transpose(Image.FLIP_LEFT_RIGHT)
             rgb_rotated = rgb_fliped.rotate(180)
             final_rgb = rgb_rotated.rotate(angle_deg)
+        else:
+            final_rgb = rgb_resized
         final_rgb = np.array(final_rgb)
         final_rgb = np.transpose(final_rgb, (2, 0, 1)).astype(int)
 
@@ -149,9 +153,13 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         mesh_gpu = mesh_cpu.to(gpu_device)
         
         # Transform on GPU
-        transform = RotateAxisAngle(angle_deg, axis="Y", degrees=True, device=gpu_device)
         verts = mesh_gpu.verts_padded()
-        verts_rot = transform.transform_points(verts)
+        transform = None
+        if self.apply_random_orientation:
+            transform = RotateAxisAngle(angle_deg, axis="Y", degrees=True, device=gpu_device)
+            verts_rot = transform.transform_points(verts)
+        else:
+            verts_rot = verts
 
         mesh_rot = Meshes(
             verts=[verts_rot[0]],  # remove batch dim for constructor
@@ -165,7 +173,9 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         normals_oblique = np.transpose(normals_oblique, (2, 0, 1))
         
         # Aggressive cleanup to free GPU memory immediately
-        del fragments_oblique, mesh_rot, verts_rot, transform, mesh_gpu, verts
+        del fragments_oblique, mesh_rot, verts_rot, mesh_gpu, verts
+        if transform is not None:
+            del transform
         
         # Clear GPU cache to prevent accumulation
         if torch.cuda.is_available():

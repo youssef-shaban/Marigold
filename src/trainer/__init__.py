@@ -31,12 +31,14 @@
 from .marigold_depth_trainer import MarigoldDepthTrainer
 from .marigold_iid_trainer import MarigoldIIDTrainer
 from .marigold_normals_trainer import MarigoldNormalsTrainer
+from .baseline_normals_trainer import BaselineNormalsTrainer
 
 
 trainer_cls_name_dict = {
     "MarigoldDepthTrainer": MarigoldDepthTrainer,
     "MarigoldIIDTrainer": MarigoldIIDTrainer,
     "MarigoldNormalsTrainer": MarigoldNormalsTrainer,
+    "BaselineNormalsTrainer": BaselineNormalsTrainer,
 }
 
 

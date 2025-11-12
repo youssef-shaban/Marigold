@@ -7,3 +7,4 @@ dataset:
     resize_to_hw:
     - 512
     - 512
+    apply_random_orientation: false
