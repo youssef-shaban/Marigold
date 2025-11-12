@@ -12,10 +12,13 @@ from PIL import Image
 from diffusers import DDIMScheduler, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel
 from diffusers.utils import BaseOutput
 from torch.utils.data import DataLoader, TensorDataset
-from torchvision.models import Dinov2_ViT_S14_Weights, dinov2_vits14
 from torchvision.transforms import InterpolationMode
-from torchvision.transforms.functional import pil_to_tensor, resize
+from torchvision.transforms.functional import pil_to_tensor, resize, to_pil_image
 from tqdm.auto import tqdm
+import timm  # type: ignore[import]
+from timm.data import resolve_model_data_config  # type: ignore[import]
+from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD  # type: ignore[import]
+from timm.data.transforms_factory import create_transform  # type: ignore[import]
 
 from .util.batchsize import find_batch_size
 from .util.ensemble import ensemble_normals
@@ -60,16 +63,24 @@ class BaselineNormalsPipeline(DiffusionPipeline):
         super().__init__()
 
         if image_encoder is None:
-            weights = Dinov2_ViT_S14_Weights.IMAGENET1K_V1
-            image_encoder = dinov2_vits14(weights=weights)
-            image_processor = weights.transforms()
+            image_encoder = timm.create_model(
+                "vit_small_patch14_dinov2.lvd142m",
+                pretrained=True,
+                num_classes=0,
+                global_pool="",
+            )
+            try:
+                config = resolve_model_data_config(model=image_encoder)
+                image_processor = create_transform(**config, is_training=False)
+            except Exception:  # pragma: no cover - best-effort fallback
+                image_processor = None
         else:
-            # Use provided image processor if available; otherwise fall back to default Dinov2 transforms.
-            if image_processor is None and hasattr(image_encoder, "weights"):
+            if image_processor is None:
                 try:
-                    image_processor = image_encoder.weights.transforms()
+                    config = resolve_model_data_config(model=image_encoder)
+                    image_processor = create_transform(**config, is_training=False)
                 except Exception:  # pragma: no cover - best-effort fallback
-                    pass
+                    image_processor = None
 
         image_encoder.requires_grad_(False)
         image_encoder.eval()
@@ -108,8 +119,10 @@ class BaselineNormalsPipeline(DiffusionPipeline):
         # Normalization is optional; keep it identity to avoid additional trainable params.
         self.condition_norm = nn.Identity()
 
-        # Transforms for the conditioning encoder
+        # Transforms and normalization for the conditioning encoder
         self.condition_transform = image_processor
+        self.condition_mean = torch.tensor(IMAGENET_DEFAULT_MEAN, dtype=torch.float32).view(1, -1, 1, 1)
+        self.condition_std = torch.tensor(IMAGENET_DEFAULT_STD, dtype=torch.float32).view(1, -1, 1, 1)
 
         # Cached dtype for inference convenience
         self.empty_condition = None
@@ -310,10 +323,13 @@ class BaselineNormalsPipeline(DiffusionPipeline):
         if self.condition_transform is not None:
             processed_list = []
             for img in rgb_01:
-                processed_list.append(self.condition_transform(img))
+                pil_img = to_pil_image(img.cpu())
+                processed_list.append(self.condition_transform(pil_img))
             cond_in = torch.stack(processed_list, dim=0)
         else:
-            cond_in = rgb_01
+            mean = self.condition_mean.to(rgb_01.device)
+            std = self.condition_std.to(rgb_01.device)
+            cond_in = (rgb_01 - mean) / std
 
         cond_in = cond_in.to(device=device, dtype=torch.float32)
         self.image_encoder.to(device)

@@ -12,7 +12,7 @@ cat "$CONFIG"
 rm -rf /tmp/Marigold_data/
 
 pip uninstall -y transformers diffusers
-pip install transformers==4.49 diffusers==0.32.2
+pip install transformers==4.49 diffusers==0.32.2 timm==0.9.16
 
 python script/baseline/train.py \
         --base_data_dir /data \
