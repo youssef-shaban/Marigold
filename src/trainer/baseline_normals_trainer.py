@@ -80,6 +80,11 @@ class BaselineNormalsTrainer:
                 self.model.unet.enable_xformers_memory_efficient_attention()
             except Exception:
                 logging.warning("XFormers memory efficient attention could not be enabled.")
+        if hasattr(self.model.unet, "enable_gradient_checkpointing"):
+            try:
+                self.model.unet.enable_gradient_checkpointing()
+            except Exception:
+                logging.warning("Gradient checkpointing could not be enabled for the UNet.")
 
         # Freeze everything except the UNet
         self.model.image_encoder.requires_grad_(False)

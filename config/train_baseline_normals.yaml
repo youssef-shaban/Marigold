@@ -9,8 +9,8 @@ base_config:
 pipeline:
   name: BaselineNormalsPipeline
   kwargs:
-    default_denoising_steps: 100
-    default_processing_resolution: 512
+    default_denoising_steps: 60
+    default_processing_resolution: 320
 
 augmentation:
   color_jitter_p: 0.3
@@ -26,8 +26,8 @@ augmentation:
 
 dataloader:
   num_workers: 8
-  effective_batch_size: 16
-  max_train_batch_size: 4
+  effective_batch_size: 4
+  max_train_batch_size: 1
   seed: 2024
   persistent_workers: true
   pin_memory: true
@@ -42,7 +42,7 @@ trainer:
   visualization_period: 1000
 
 multi_res_noise:
-  strength: 0.5
+  strength: 0.4
   annealed: true
   downscale_strategy: original
 
@@ -66,9 +66,9 @@ lr_scheduler:
     warmup_steps: 500
 
 validation:
-  denoising_steps: 100
+  denoising_steps: 60
   ensemble_size: 1
-  processing_res: 512
+  processing_res: 320
   match_input_res: true
   resample_method: bilinear
   main_val_metric: mean_angular_error

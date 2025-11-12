@@ -9,24 +9,20 @@ model:
       down_block_types:
       - CrossAttnDownBlock2D
       - CrossAttnDownBlock2D
-      - CrossAttnDownBlock2D
       - DownBlock2D
       up_block_types:
       - UpBlock2D
       - CrossAttnUpBlock2D
       - CrossAttnUpBlock2D
-      - CrossAttnUpBlock2D
       block_out_channels:
+      - 128
+      - 192
       - 256
-      - 512
-      - 768
-      - 768
-      layers_per_block: 2
+      layers_per_block: 1
       attention_head_dim:
       - 4
+      - 4
       - 8
-      - 12
-      - 12
       cross_attention_dim: 384
       norm_num_groups: 32
       resnet_time_scale_shift: scale_shift
