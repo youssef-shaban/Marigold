@@ -186,6 +186,10 @@ class BaselineNormalsTrainer:
 
     def train(self, t_end=None):
         logging.info("Start training")
+        logging.info(f"Training configuration: max_epoch={self.max_epoch}, max_iter={self.max_iter}, "
+                    f"gradient_accumulation_steps={self.gradient_accumulation_steps}")
+        logging.info(f"Checkpoint periods: save={self.save_period}, backup={self.backup_period}, "
+                    f"validation={self.val_period}, visualization={self.vis_period}")
 
         device = self.device
         self.model.to(device)
@@ -201,9 +205,10 @@ class BaselineNormalsTrainer:
 
         for epoch in range(self.epoch, self.max_epoch + 1):
             self.epoch = epoch
-            logging.debug(f"epoch: {self.epoch}")
+            logging.info(f"Starting epoch: {self.epoch}")
 
             for batch in skip_first_batches(self.train_loader, self.n_batch_in_epoch):
+                logging.info(f"Batch {self.n_batch_in_epoch + 1} received from dataloader")
                 self.model.unet.train()
 
                 # Consistent random generators
@@ -213,25 +218,33 @@ class BaselineNormalsTrainer:
                     rand_num_generator.manual_seed(local_seed)
                 else:
                     rand_num_generator = None
+                logging.debug("Random generator initialized")
 
+                logging.info("Loading batch data to device")
                 rgb = batch["rgb_norm"].to(device=device, dtype=self.model.dtype)
                 normals_gt = batch[self.gt_normals_type].to(device=device, dtype=self.model.dtype)
+                logging.debug(f"Data loaded: rgb shape={rgb.shape}, normals_gt shape={normals_gt.shape}")
 
                 if self.gt_mask_type is not None:
+                    logging.info("Processing ground truth mask")
                     valid_mask_for_latent = batch[self.gt_mask_type].to(device=device)
                     invalid_mask = ~valid_mask_for_latent
                     valid_mask_down = ~torch.max_pool2d(
                         invalid_mask.float(), 8, 8
                     ).bool()
                     valid_mask_down = valid_mask_down.repeat((1, 3, 1, 1))
+                    logging.debug(f"Mask processed: valid_mask_down shape={valid_mask_down.shape}")
                 else:
                     valid_mask_down = None
 
                 batch_size = rgb.shape[0]
 
+                logging.info("Encoding RGB to condition tokens")
                 with torch.no_grad():
                     condition_tokens = self.model.to_condition_tokens(rgb)
+                logging.debug(f"Condition tokens encoded: shape={condition_tokens.shape}")
 
+                logging.info("Generating timesteps")
                 timesteps = torch.randint(
                     0,
                     self.scheduler_timesteps,
@@ -239,7 +252,9 @@ class BaselineNormalsTrainer:
                     device=device,
                     generator=rand_num_generator,
                 ).long()
+                logging.debug(f"Timesteps generated: {timesteps}")
 
+                logging.info("Generating noise")
                 if self.apply_multi_res_noise:
                     strength = self.mr_noise_strength
                     if self.annealed_mr_noise:
@@ -251,6 +266,7 @@ class BaselineNormalsTrainer:
                         generator=rand_num_generator,
                         device=device,
                     )
+                    logging.debug(f"Multi-res noise generated with strength={strength}")
                 else:
                     noise = torch.randn(
                         normals_gt.shape,
@@ -258,18 +274,27 @@ class BaselineNormalsTrainer:
                         generator=rand_num_generator,
                         dtype=self.model.dtype,
                     )
+                    logging.debug("Standard noise generated")
 
+                logging.info("Adding noise to targets")
                 noisy_targets = self.training_noise_scheduler.add_noise(
                     normals_gt, noise, timesteps
                 )
+                logging.debug(f"Noisy targets created: shape={noisy_targets.shape}")
 
+                logging.info("Preparing UNet input and running forward pass")
                 unet_input = torch.cat([rgb, noisy_targets], dim=1).float()
+                logging.debug(f"UNet input prepared: shape={unet_input.shape}")
+                
                 model_pred = self.model.unet(
                     unet_input,
                     timesteps,
                     encoder_hidden_states=condition_tokens,
                 ).sample
+                logging.info("UNet forward pass completed")
+                logging.debug(f"Model prediction shape={model_pred.shape}")
 
+                logging.info("Computing loss target")
                 if "sample" == self.prediction_type:
                     target = normals_gt
                 elif "epsilon" == self.prediction_type:
@@ -280,30 +305,40 @@ class BaselineNormalsTrainer:
                     )
                 else:
                     raise ValueError(f"Unknown prediction type {self.prediction_type}")
+                logging.debug(f"Loss target prepared (prediction_type={self.prediction_type})")
 
+                logging.info("Computing loss")
                 if valid_mask_down is not None:
                     loss_value = self.loss(
                         model_pred[valid_mask_down].float(),
                         target[valid_mask_down].float(),
                     )
+                    logging.debug("Loss computed with mask")
                 else:
                     loss_value = self.loss(model_pred.float(), target.float())
+                    logging.debug("Loss computed without mask")
 
                 loss = loss_value.mean()
                 self.train_metrics.update("loss", loss.item())
+                logging.debug(f"Loss value: {loss.item():.5f}")
 
+                logging.info("Running backward pass")
                 loss = loss / self.gradient_accumulation_steps
                 loss.backward()
+                logging.info("Backward pass completed")
                 accumulated_step += 1
                 self.n_batch_in_epoch += 1
 
                 if accumulated_step >= self.gradient_accumulation_steps:
+                    logging.info(f"Gradient accumulation complete ({self.gradient_accumulation_steps} steps), applying optimizer")
                     self.optimizer.step()
                     self.lr_scheduler.step()
                     self.optimizer.zero_grad()
+                    logging.debug("Optimizer step completed")
                     accumulated_step = 0
                     self.effective_iter += 1
 
+                    logging.info("Logging metrics to tensorboard")
                     accumulated_loss = self.train_metrics.result()["loss"]
                     tb_logger.log_dict(
                         {
@@ -327,9 +362,12 @@ class BaselineNormalsTrainer:
                     )
                     self.train_metrics.reset()
 
+                    logging.info("Calling train step callbacks")
                     self._train_step_callback()
+                    logging.debug("Train step callbacks completed")
 
                     if self.max_iter > 0 and self.effective_iter >= self.max_iter:
+                        logging.info("Max iterations reached, saving final checkpoint")
                         self.save_checkpoint(
                             ckpt_name=self._get_backup_ckpt_name(),
                             save_train_state=False,
@@ -337,38 +375,50 @@ class BaselineNormalsTrainer:
                         logging.info("Training ended.")
                         return
                     elif t_end is not None and datetime.now() >= t_end:
+                        logging.info("Time limit reached, saving checkpoint")
                         self.save_checkpoint(ckpt_name="latest", save_train_state=True)
                         logging.info("Time is up, training paused.")
                         return
 
+                    logging.info("Clearing CUDA cache")
                     torch.cuda.empty_cache()
+                    logging.debug("CUDA cache cleared")
 
             self.n_batch_in_epoch = 0
+            logging.info(f"Epoch {epoch} completed")
 
     def _train_step_callback(self):
         if self.backup_period > 0 and 0 == self.effective_iter % self.backup_period:
+            logging.info(f"Backup period reached (every {self.backup_period} iters), saving backup checkpoint")
             self.save_checkpoint(
                 ckpt_name=self._get_backup_ckpt_name(), save_train_state=False
             )
+            logging.debug("Backup checkpoint saved")
 
         _is_latest_saved = False
         if self.val_period > 0 and 0 == self.effective_iter % self.val_period:
+            logging.info(f"Validation period reached (every {self.val_period} iters), starting validation")
             self.in_evaluation = True
             self.save_checkpoint(ckpt_name="latest", save_train_state=True)
             _is_latest_saved = True
             self.validate()
             self.in_evaluation = False
             self.save_checkpoint(ckpt_name="latest", save_train_state=True)
+            logging.info("Validation completed")
 
         if (
             self.save_period > 0
             and 0 == self.effective_iter % self.save_period
             and not _is_latest_saved
         ):
+            logging.info(f"Save period reached (every {self.save_period} iters), saving checkpoint")
             self.save_checkpoint(ckpt_name="latest", save_train_state=True)
+            logging.debug("Latest checkpoint saved")
 
         if self.vis_period > 0 and 0 == self.effective_iter % self.vis_period:
+            logging.info(f"Visualization period reached (every {self.vis_period} iters), running visualization")
             self.visualize()
+            logging.info("Visualization completed")
 
     def validate(self):
         for i, val_loader in enumerate(self.val_loaders):
