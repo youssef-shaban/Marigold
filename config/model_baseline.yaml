@@ -15,9 +15,9 @@ model:
       - CrossAttnUpBlock2D
       - CrossAttnUpBlock2D
       block_out_channels:
-      - 96
       - 128
-      - 160
+      - 192
+      - 256
       layers_per_block: 1
       attention_head_dim:
       - 4
