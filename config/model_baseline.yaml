@@ -1,32 +1,50 @@
-# Model definition for the baseline Conditional2DUnet normals pipeline.
 model:
   unet:
     name: UNet2DConditionModel
     kwargs:
-      sample_size: 128
+      # --- The Big Change ---
+      sample_size: 256
+
       in_channels: 6
       out_channels: 3
+      
+      # --- We MUST add more blocks for the larger size ---
+      # This creates 5 levels of down/up sampling
       down_block_types:
-      - CrossAttnDownBlock2D
-      - CrossAttnDownBlock2D
-      - DownBlock2D
+      - DownBlock2D           # 256 -> 128 (No attention)
+      - DownBlock2D           # 128 -> 64 (No attention)
+      - CrossAttnDownBlock2D  # 64 -> 32   (Attention starts here)
+      - CrossAttnDownBlock2D  # 32 -> 16   (Attention here)
+      - CrossAttnDownBlock2D  # 16 -> 8    (Attention here)
+      
+      # Symmetric up-sampling
       up_block_types:
-      - UpBlock2D
-      - CrossAttnUpBlock2D
-      - CrossAttnUpBlock2D
+      - CrossAttnUpBlock2D  # 8 -> 16
+      - CrossAttnUpBlock2D  # 16 -> 32
+      - CrossAttnUpBlock2D  # 32 -> 64
+      - UpBlock2D           # 64 -> 128
+      - UpBlock2D           # 128 -> 256
+
+      # 5 channel widths, one for each block
+      # Kept modest to control parameter count
       block_out_channels:
       - 128
-      - 192
       - 256
-      layers_per_block: 1
-      attention_head_dim:
-      - 4
-      - 4
-      - 8
-      cross_attention_dim: 384
+      - 384
+      - 512
+      - 512
+
+      # This is standard, but see note below
+      layers_per_block: 2
+
+      attention_head_dim: 8
+      cross_attention_dim: 384 # Correct for DINOv2-Small
+      
       norm_num_groups: 32
       resnet_time_scale_shift: scale_shift
       use_linear_projection: true
+
+  # Scheduler remains the same
   scheduler:
     name: DDPMScheduler
     kwargs:
@@ -35,4 +53,3 @@ model:
       prediction_type: epsilon
       clip_sample: false
       timestep_spacing: leading
-

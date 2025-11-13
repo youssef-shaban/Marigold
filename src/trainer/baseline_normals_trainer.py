@@ -75,16 +75,16 @@ class BaselineNormalsTrainer:
             )
 
         self.model.to(self.device)
-        if hasattr(self.model.unet, "enable_xformers_memory_efficient_attention"):
-            try:
-                self.model.unet.enable_xformers_memory_efficient_attention()
-            except Exception:
-                logging.warning("XFormers memory efficient attention could not be enabled.")
-        if hasattr(self.model.unet, "enable_gradient_checkpointing"):
-            try:
-                self.model.unet.enable_gradient_checkpointing()
-            except Exception:
-                logging.warning("Gradient checkpointing could not be enabled for the UNet.")
+        # if hasattr(self.model.unet, "enable_xformers_memory_efficient_attention"):
+        #     try:
+        #         self.model.unet.enable_xformers_memory_efficient_attention()
+        #     except Exception:
+        #         logging.warning("XFormers memory efficient attention could not be enabled.")
+        # if hasattr(self.model.unet, "enable_gradient_checkpointing"):
+        #     try:
+        #         self.model.unet.enable_gradient_checkpointing()
+        #     except Exception:
+        #         logging.warning("Gradient checkpointing could not be enabled for the UNet.")
 
         # Freeze everything except the UNet
         self.model.image_encoder.requires_grad_(False)
@@ -220,13 +220,13 @@ class BaselineNormalsTrainer:
                     rand_num_generator = None
                 logging.debug("Random generator initialized")
 
-                logging.info("Loading batch data to device")
+                logging.debug("Loading batch data to device")
                 rgb = batch["rgb_norm"].to(device=device, dtype=self.model.dtype)
                 normals_gt = batch[self.gt_normals_type].to(device=device, dtype=self.model.dtype)
                 logging.debug(f"Data loaded: rgb shape={rgb.shape}, normals_gt shape={normals_gt.shape}")
 
                 if self.gt_mask_type is not None:
-                    logging.info("Processing ground truth mask")
+                    logging.debug("Processing ground truth mask")
                     valid_mask_for_latent = batch[self.gt_mask_type].to(device=device)
                     invalid_mask = ~valid_mask_for_latent
                     valid_mask_down = ~torch.max_pool2d(
@@ -239,12 +239,12 @@ class BaselineNormalsTrainer:
 
                 batch_size = rgb.shape[0]
 
-                logging.info("Encoding RGB to condition tokens")
+                logging.debug("Encoding RGB to condition tokens")
                 with torch.no_grad():
                     condition_tokens = self.model.to_condition_tokens(rgb)
                 logging.debug(f"Condition tokens encoded: shape={condition_tokens.shape}")
 
-                logging.info("Generating timesteps")
+                logging.debug("Generating timesteps")
                 timesteps = torch.randint(
                     0,
                     self.scheduler_timesteps,
@@ -254,7 +254,7 @@ class BaselineNormalsTrainer:
                 ).long()
                 logging.debug(f"Timesteps generated: {timesteps}")
 
-                logging.info("Generating noise")
+                logging.debug("Generating noise")
                 if self.apply_multi_res_noise:
                     strength = self.mr_noise_strength
                     if self.annealed_mr_noise:
@@ -276,13 +276,13 @@ class BaselineNormalsTrainer:
                     )
                     logging.debug("Standard noise generated")
 
-                logging.info("Adding noise to targets")
+                logging.debug("Adding noise to targets")
                 noisy_targets = self.training_noise_scheduler.add_noise(
                     normals_gt, noise, timesteps
                 )
                 logging.debug(f"Noisy targets created: shape={noisy_targets.shape}")
 
-                logging.info("Preparing UNet input and running forward pass")
+                logging.debug("Preparing UNet input and running forward pass")
                 unet_input = torch.cat([rgb, noisy_targets], dim=1).float()
                 logging.debug(f"UNet input prepared: shape={unet_input.shape}")
                 
@@ -291,10 +291,10 @@ class BaselineNormalsTrainer:
                     timesteps,
                     encoder_hidden_states=condition_tokens,
                 ).sample
-                logging.info("UNet forward pass completed")
+                logging.debug("UNet forward pass completed")
                 logging.debug(f"Model prediction shape={model_pred.shape}")
 
-                logging.info("Computing loss target")
+                logging.debug("Computing loss target")
                 if "sample" == self.prediction_type:
                     target = normals_gt
                 elif "epsilon" == self.prediction_type:
@@ -307,7 +307,7 @@ class BaselineNormalsTrainer:
                     raise ValueError(f"Unknown prediction type {self.prediction_type}")
                 logging.debug(f"Loss target prepared (prediction_type={self.prediction_type})")
 
-                logging.info("Computing loss")
+                logging.debug("Computing loss")
                 if valid_mask_down is not None:
                     loss_value = self.loss(
                         model_pred[valid_mask_down].float(),
@@ -322,15 +322,15 @@ class BaselineNormalsTrainer:
                 self.train_metrics.update("loss", loss.item())
                 logging.debug(f"Loss value: {loss.item():.5f}")
 
-                logging.info("Running backward pass")
+                logging.debug("Running backward pass")
                 loss = loss / self.gradient_accumulation_steps
                 loss.backward()
-                logging.info("Backward pass completed")
+                logging.debug("Backward pass completed")
                 accumulated_step += 1
                 self.n_batch_in_epoch += 1
 
                 if accumulated_step >= self.gradient_accumulation_steps:
-                    logging.info(f"Gradient accumulation complete ({self.gradient_accumulation_steps} steps), applying optimizer")
+                    logging.debug(f"Gradient accumulation complete ({self.gradient_accumulation_steps} steps), applying optimizer")
                     self.optimizer.step()
                     self.lr_scheduler.step()
                     self.optimizer.zero_grad()
@@ -338,7 +338,7 @@ class BaselineNormalsTrainer:
                     accumulated_step = 0
                     self.effective_iter += 1
 
-                    logging.info("Logging metrics to tensorboard")
+                    logging.debug("Logging metrics to tensorboard")
                     accumulated_loss = self.train_metrics.result()["loss"]
                     tb_logger.log_dict(
                         {
@@ -362,7 +362,7 @@ class BaselineNormalsTrainer:
                     )
                     self.train_metrics.reset()
 
-                    logging.info("Calling train step callbacks")
+                    logging.debug("Calling train step callbacks")
                     self._train_step_callback()
                     logging.debug("Train step callbacks completed")
 

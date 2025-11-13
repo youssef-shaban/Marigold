@@ -10,7 +10,7 @@ pipeline:
   name: BaselineNormalsPipeline
   kwargs:
     default_denoising_steps: 60
-    default_processing_resolution: 320
+    default_processing_resolution: 256
 
 augmentation:
   color_jitter_p: 0.3
