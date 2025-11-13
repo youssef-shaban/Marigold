@@ -276,8 +276,8 @@ class BaselineNormalsPipeline(DiffusionPipeline):
         self.scheduler.set_timesteps(num_inference_steps, device=device)
         timesteps = self.scheduler.timesteps
 
-        target = torch.randn_like(
-            rgb_in,
+        target = torch.randn(
+            rgb_in.shape,
             generator=generator,
         ).to(device=device, dtype=self.dtype)
 

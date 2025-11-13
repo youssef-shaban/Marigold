@@ -208,7 +208,7 @@ class BaselineNormalsTrainer:
             logging.info(f"Starting epoch: {self.epoch}")
 
             for batch in skip_first_batches(self.train_loader, self.n_batch_in_epoch):
-                logging.info(f"Batch {self.n_batch_in_epoch + 1} received from dataloader")
+                logging.debug(f"Batch {self.n_batch_in_epoch + 1} received from dataloader")
                 self.model.unet.train()
 
                 # Consistent random generators
@@ -380,7 +380,7 @@ class BaselineNormalsTrainer:
                         logging.info("Time is up, training paused.")
                         return
 
-                    logging.info("Clearing CUDA cache")
+                    logging.debug("Clearing CUDA cache")
                     torch.cuda.empty_cache()
                     logging.debug("CUDA cache cleared")
 
