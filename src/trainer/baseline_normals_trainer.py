@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from PIL import Image
 from safetensors.torch import load_file
+import contextlib
 
 from marigold.baseline_normals_pipeline import (
     BaselineNormalsPipeline,
@@ -96,6 +97,7 @@ class BaselineNormalsTrainer:
                 param.requires_grad_(True)
 
         self.model.unet.requires_grad_(True)
+        self.use_amp = self.cfg.get("use_amp", True)
 
         # Optimizer and scheduler
         lr = self.cfg.lr
@@ -111,6 +113,11 @@ class BaselineNormalsTrainer:
                 trainable_parameters.extend(norm_params)
 
         self.optimizer = Adam(trainable_parameters, lr=lr)
+        if self.use_amp:
+            from torch.amp import GradScaler
+            self.scaler = GradScaler("cuda")
+        else:
+            self.scaler = None
 
         lr_func = IterExponential(
             total_iter_length=self.cfg.lr_scheduler.kwargs.total_iter,
@@ -231,7 +238,8 @@ class BaselineNormalsTrainer:
 
                 with torch.no_grad():
                     condition_tokens = self.model.to_condition_tokens(rgb)
-
+                    if self.use_amp:
+                        condition_tokens = condition_tokens.to(dtype=torch.float16)
                 timesteps = torch.randint(
                     0,
                     self.scheduler_timesteps,
@@ -263,12 +271,18 @@ class BaselineNormalsTrainer:
                     normals_gt, noise, timesteps
                 )
 
-                unet_input = torch.cat([rgb, noisy_targets], dim=1).float()
-                model_pred = self.model.unet(
-                    unet_input,
-                    timesteps,
-                    encoder_hidden_states=condition_tokens,
-                ).sample
+                unet_input = torch.cat([rgb, noisy_targets], dim=1)
+                if self.use_amp:
+                    unet_input = unet_input.to(dtype=torch.float16)
+                autocast_ctx = (
+                    torch.cuda.amp.autocast() if self.use_amp else contextlib.nullcontext()
+                )
+                with autocast_ctx:
+                    model_pred = self.model.unet(
+                        unet_input,
+                        timesteps,
+                        encoder_hidden_states=condition_tokens,
+                    ).sample
 
                 if "sample" == self.prediction_type:
                     target = normals_gt
@@ -281,26 +295,38 @@ class BaselineNormalsTrainer:
                 else:
                     raise ValueError(f"Unknown prediction type {self.prediction_type}")
 
+                if self.use_amp:
+                    model_pred_for_loss = model_pred.float()
+                else:
+                    model_pred_for_loss = model_pred
+
                 if valid_mask_down is not None:
                     loss_value = self.loss(
-                        model_pred[valid_mask_down].float(),
+                        model_pred_for_loss[valid_mask_down].float(),
                         target[valid_mask_down].float(),
                     )
                 else:
-                    loss_value = self.loss(model_pred.float(), target.float())
+                    loss_value = self.loss(model_pred_for_loss.float(), target.float())
 
                 loss = loss_value.mean()
                 self.train_metrics.update("loss", loss.item())
 
                 loss = loss / self.gradient_accumulation_steps
-                loss.backward()
+                if self.use_amp:
+                    self.scaler.scale(loss).backward()
+                else:
+                    loss.backward()
                 accumulated_step += 1
                 self.n_batch_in_epoch += 1
 
                 if accumulated_step >= self.gradient_accumulation_steps:
-                    self.optimizer.step()
+                    if self.use_amp:
+                        self.scaler.step(self.optimizer)
+                        self.scaler.update()
+                    else:
+                        self.optimizer.step()
                     self.lr_scheduler.step()
-                    self.optimizer.zero_grad()
+                    self.optimizer.zero_grad(set_to_none=True)
                     accumulated_step = 0
                     self.effective_iter += 1
 
