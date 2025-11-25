@@ -234,6 +234,8 @@ if "__main__" == __name__:
         logging.debug("Proceeding without xformers")
 
     pipe = pipe.to(device)
+    if use_aspect_ratio:
+        pipe.enable_aspect_ratio_conditioning(checkpoint_path)
     logging.info("Loaded normals pipeline")
 
     # -------------------- Inference and saving --------------------

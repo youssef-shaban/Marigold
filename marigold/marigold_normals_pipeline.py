@@ -29,6 +29,7 @@
 # --------------------------------------------------------------------------
 
 import logging
+import os
 import numpy as np
 import torch
 from PIL import Image
@@ -49,6 +50,7 @@ from typing import Dict, Optional, Tuple, Union
 
 from .util.batchsize import find_batch_size
 from .util.ensemble import ensemble_normals
+from src.util.aspect_ratio_embedding import AspectRatioEmbedding
 from .util.image_util import (
     chw2hwc,
     get_tv_resample_method,
@@ -136,6 +138,9 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
         self.default_processing_resolution = default_processing_resolution
 
         self.empty_text_embed = None
+        self._aspect_ratio_ready = isinstance(
+            getattr(self.unet, "class_embedding", None), AspectRatioEmbedding
+        )
 
     @torch.no_grad()
     def __call__(
@@ -344,6 +349,125 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
             normals_latent=final_latent,
             uncertainty=pred_uncert,
         )
+
+    # ------------------------------------------------------------------
+    # Aspect ratio conditioning helpers
+    # ------------------------------------------------------------------
+    def enable_aspect_ratio_conditioning(self, checkpoint_identifier: str) -> None:
+        """
+        Enable aspect-ratio conditioning by injecting the embedding module into the UNet
+        and loading the trained weights from the provided checkpoint location.
+        """
+        if self._aspect_ratio_ready:
+            return
+
+        self._inject_aspect_ratio_embedding()
+        loaded = self._load_aspect_ratio_weights(checkpoint_identifier)
+        if loaded:
+            logging.info("Aspect ratio embedding weights loaded.")
+        else:
+            logging.warning(
+                "Aspect ratio embedding injected but pretrained weights were not found. "
+                "The module will use freshly initialized weights."
+            )
+        self._aspect_ratio_ready = True
+
+    def _inject_aspect_ratio_embedding(self) -> None:
+        unet = self.unet
+        class_embedding = getattr(unet, "class_embedding", None)
+
+        if isinstance(class_embedding, AspectRatioEmbedding):
+            return
+
+        time_embedding = getattr(unet, "time_embedding", None)
+        if time_embedding is None or not hasattr(time_embedding, "linear_1"):
+            raise AttributeError(
+                "UNet time_embedding.linear_1 is required to infer timestep embedding dimension."
+            )
+
+        timestep_emb_dim = time_embedding.linear_1.out_features
+        device = time_embedding.linear_1.weight.device
+        aspect_ratio_embedding = AspectRatioEmbedding(
+            timestep_emb_dim=timestep_emb_dim
+        ).to(device)
+        self.unet.class_embedding = aspect_ratio_embedding
+
+    def _load_aspect_ratio_weights(self, checkpoint_identifier: str) -> bool:
+        """
+        Attempt to load aspect-ratio embedding weights from the checkpoint.
+        """
+        weight_paths = []
+
+        if os.path.isdir(checkpoint_identifier):
+            candidates = [
+                os.path.join(
+                    checkpoint_identifier, "unet", "diffusion_pytorch_model.safetensors"
+                ),
+                os.path.join(
+                    checkpoint_identifier, "unet", "diffusion_pytorch_model.fp16.safetensors"
+                ),
+                os.path.join(
+                    checkpoint_identifier, "unet", "diffusion_pytorch_model.bin"
+                ),
+            ]
+            weight_paths = [p for p in candidates if os.path.exists(p)]
+        else:
+            try:
+                from huggingface_hub import hf_hub_download
+            except ImportError:
+                hf_hub_download = None
+
+            if hf_hub_download is not None:
+                repo_id = checkpoint_identifier
+                filenames = [
+                    "diffusion_pytorch_model.safetensors",
+                    "diffusion_pytorch_model.fp16.safetensors",
+                    "diffusion_pytorch_model.bin",
+                ]
+                for filename in filenames:
+                    try:
+                        path = hf_hub_download(
+                            repo_id=repo_id, filename=filename, subfolder="unet"
+                        )
+                        if path is not None:
+                            weight_paths.append(path)
+                            break
+                    except Exception:
+                        continue
+
+        if not weight_paths:
+            return False
+
+        class_state = None
+        for path in weight_paths:
+            try:
+                if path.endswith(".safetensors"):
+                    try:
+                        from safetensors.torch import load_file as load_safetensors
+                    except ImportError as exc:  # pragma: no cover - optional dependency
+                        logging.warning(
+                            f"Unable to import safetensors to load '{path}': {exc}"
+                        )
+                        continue
+                    state_dict = load_safetensors(path)
+                else:
+                    state_dict = torch.load(path, map_location="cpu")
+                class_state = {
+                    k.split("class_embedding.", 1)[1]: v
+                    for k, v in state_dict.items()
+                    if k.startswith("class_embedding.")
+                }
+                if class_state:
+                    break
+            except Exception as exc:  # pragma: no cover - best effort
+                logging.warning(f"Failed to read aspect ratio weights from '{path}': {exc}")
+                continue
+
+        if not class_state:
+            return False
+
+        self.unet.class_embedding.load_state_dict(class_state, strict=True)
+        return True
 
     def _check_inference_step(self, n_step: int) -> None:
         """
