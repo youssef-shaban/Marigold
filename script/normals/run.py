@@ -60,12 +60,12 @@ if "__main__" == __name__:
         default="prs-eth/marigold-normals-v1-1",
         help="Checkpoint path or hub name.",
     )
-    parser.add_argument(
-        "--input_rgb_dir",
-        type=str,
-        required=True,
-        help="Path to the input image folder.",
-    )
+parser.add_argument(
+    "--input_rgb_dir",
+    type=str,
+    required=True,
+    help="Path containing `image/` and `roof_intuitive_mask/` subfolders.",
+)
     parser.add_argument(
         "--output_dir", type=str, required=True, help="Output directory."
     )
@@ -177,18 +177,33 @@ if "__main__" == __name__:
             logging.warning("CUDA is not available. Running on CPU will be slow.")
     logging.info(f"device = {device}")
 
-    # -------------------- Data --------------------
-    rgb_filename_list = glob(os.path.join(input_rgb_dir, "*"))
-    rgb_filename_list = [
-        f for f in rgb_filename_list if os.path.splitext(f)[1].lower() in EXTENSION_LIST
-    ]
+image_dir = os.path.join(input_rgb_dir, "image")
+mask_dir = os.path.join(input_rgb_dir, "roof_intuitive_mask")
+if not os.path.isdir(image_dir):
+    logging.error(f"Expected image directory at '{image_dir}'.")
+    exit(1)
+if not os.path.isdir(mask_dir):
+    logging.error(f"Expected mask directory at '{mask_dir}'.")
+    exit(1)
+
+rgb_filename_list = glob(os.path.join(image_dir, "*"))
+rgb_filename_list = [
+    f for f in rgb_filename_list if os.path.splitext(f)[1].lower() in EXTENSION_LIST
+]
     rgb_filename_list = sorted(rgb_filename_list)
     n_images = len(rgb_filename_list)
     if n_images > 0:
         logging.info(f"Found {n_images} images")
     else:
-        logging.error(f"No image found in '{input_rgb_dir}'")
+    logging.error(f"No image found in '{image_dir}'")
         exit(1)
+
+mask_extension_list = [".png", ".jpg", ".jpeg"]
+mask_lookup = {}
+for mask_path in glob(os.path.join(mask_dir, "*")):
+    ext = os.path.splitext(mask_path)[1].lower()
+    if ext in mask_extension_list:
+        mask_lookup[os.path.splitext(os.path.basename(mask_path))[0]] = mask_path
 
     # -------------------- Model --------------------
     if half_precision:
@@ -230,7 +245,32 @@ if "__main__" == __name__:
             rgb_filename_list, desc="Surface Normals Inference", leave=True
         ):
             # Read input image
-            input_image = Image.open(rgb_path)
+            input_image = Image.open(rgb_path).convert("RGB")
+
+            # Apply mask
+            base_name = os.path.splitext(os.path.basename(rgb_path))[0]
+            mask_path = mask_lookup.get(base_name)
+            if mask_path is None:
+                logging.warning(
+                    f"No mask found for '{rgb_path}'. Skipping this image."
+                )
+                continue
+
+            mask_image = Image.open(mask_path).convert("L")
+            if mask_image.size != input_image.size:
+                mask_image = mask_image.resize(input_image.size, Image.NEAREST)
+
+            mask_np = np.array(mask_image)
+            mask_binary = mask_np > 127
+            if not mask_binary.any():
+                logging.warning(
+                    f"Mask for '{rgb_path}' is empty after thresholding. Skipping."
+                )
+                continue
+
+            image_np = np.array(input_image)
+            image_np[~mask_binary] = 0
+            input_image = Image.fromarray(image_np)
 
             # Random number generator
             if seed is None:

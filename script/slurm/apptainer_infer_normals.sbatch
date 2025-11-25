@@ -13,7 +13,8 @@
 IMAGE_DIR=/projects/pointclouds/images
 IMAGE_PATH=ykorny/marigold-normals:latest
 CODE_DIR=/projects/pointclouds/Marigold
-INPUT_DIR=/projects/pointclouds/infer_input
+INPUT_DIR=/projects/pointclouds/input_images
+OUTPUT_DIR=/projects/pointclouds/predictions
 CHECKPOINT=/projects/pointclouds/ckpt/housediffusion
 
 # Inference controls
