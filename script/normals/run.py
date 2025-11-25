@@ -45,6 +45,7 @@ from tqdm.auto import tqdm
 from marigold import MarigoldNormalsPipeline, MarigoldNormalsOutput
 
 EXTENSION_LIST = [".jpg", ".jpeg", ".png"]
+MASK_EXTENSION_LIST = [".png", ".jpg", ".jpeg"]
 
 
 if "__main__" == __name__:
@@ -60,12 +61,12 @@ if "__main__" == __name__:
         default="prs-eth/marigold-normals-v1-1",
         help="Checkpoint path or hub name.",
     )
-parser.add_argument(
-    "--input_rgb_dir",
-    type=str,
-    required=True,
-    help="Path containing `image/` and `roof_intuitive_mask/` subfolders.",
-)
+    parser.add_argument(
+        "--input_rgb_dir",
+        type=str,
+        required=True,
+        help="Path containing `image/` and `roof_intuitive_mask/` subfolders.",
+    )
     parser.add_argument(
         "--output_dir", type=str, required=True, help="Output directory."
     )
@@ -177,33 +178,35 @@ parser.add_argument(
             logging.warning("CUDA is not available. Running on CPU will be slow.")
     logging.info(f"device = {device}")
 
-image_dir = os.path.join(input_rgb_dir, "image")
-mask_dir = os.path.join(input_rgb_dir, "roof_intuitive_mask")
-if not os.path.isdir(image_dir):
-    logging.error(f"Expected image directory at '{image_dir}'.")
-    exit(1)
-if not os.path.isdir(mask_dir):
-    logging.error(f"Expected mask directory at '{mask_dir}'.")
-    exit(1)
+    # -------------------- Data --------------------
+    image_dir = os.path.join(input_rgb_dir, "image")
+    mask_dir = os.path.join(input_rgb_dir, "roof_intuitive_mask")
+    if not os.path.isdir(image_dir):
+        logging.error(f"Expected image directory at '{image_dir}'.")
+        exit(1)
+    if not os.path.isdir(mask_dir):
+        logging.error(f"Expected mask directory at '{mask_dir}'.")
+        exit(1)
 
-rgb_filename_list = glob(os.path.join(image_dir, "*"))
-rgb_filename_list = [
-    f for f in rgb_filename_list if os.path.splitext(f)[1].lower() in EXTENSION_LIST
-]
+    rgb_filename_list = glob(os.path.join(image_dir, "*"))
+    rgb_filename_list = [
+        f
+        for f in rgb_filename_list
+        if os.path.splitext(f)[1].lower() in EXTENSION_LIST
+    ]
     rgb_filename_list = sorted(rgb_filename_list)
     n_images = len(rgb_filename_list)
     if n_images > 0:
         logging.info(f"Found {n_images} images")
     else:
-    logging.error(f"No image found in '{image_dir}'")
+        logging.error(f"No image found in '{image_dir}'")
         exit(1)
 
-mask_extension_list = [".png", ".jpg", ".jpeg"]
-mask_lookup = {}
-for mask_path in glob(os.path.join(mask_dir, "*")):
-    ext = os.path.splitext(mask_path)[1].lower()
-    if ext in mask_extension_list:
-        mask_lookup[os.path.splitext(os.path.basename(mask_path))[0]] = mask_path
+    mask_lookup = {}
+    for mask_path in glob(os.path.join(mask_dir, "*")):
+        ext = os.path.splitext(mask_path)[1].lower()
+        if ext in MASK_EXTENSION_LIST:
+            mask_lookup[os.path.splitext(os.path.basename(mask_path))[0]] = mask_path
 
     # -------------------- Model --------------------
     if half_precision:
