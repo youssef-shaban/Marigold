@@ -45,7 +45,7 @@ from torchvision.transforms import InterpolationMode
 from torchvision.transforms.functional import pil_to_tensor, resize
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Tuple, Union
 
 from .util.batchsize import find_batch_size
 from .util.ensemble import ensemble_normals
@@ -71,6 +71,7 @@ class MarigoldNormalsOutput(BaseOutput):
 
     normals_np: np.ndarray
     normals_img: Image.Image
+    normals_latent: np.ndarray
     uncertainty: Union[None, np.ndarray]
 
 
@@ -262,6 +263,7 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
 
         # Predict normals maps (batched)
         target_pred_ls = []
+        target_latent_ls = []
         if show_progress_bar:
             iterable = tqdm(
                 single_rgb_loader, desc=" " * 2 + "Inference batches", leave=False
@@ -274,7 +276,7 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
             else:
                 (batched_img,) = batch
                 batched_aspect_ratio = None
-            target_pred_raw = self.single_infer(
+            target_pred_raw, target_latent_raw = self.single_infer(
                 rgb_in=batched_img,
                 num_inference_steps=denoising_steps,
                 show_pbar=show_progress_bar,
@@ -282,18 +284,35 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
                 aspect_ratio=batched_aspect_ratio,
             )
             target_pred_ls.append(target_pred_raw.detach())
+            target_latent_ls.append(target_latent_raw.detach())
         target_preds = torch.concat(target_pred_ls, dim=0)
+        target_latents = torch.concat(target_latent_ls, dim=0)
         torch.cuda.empty_cache()  # clear vram cache for ensembling
 
         # ----------------- Test-time ensembling -----------------
         if ensemble_size > 1:
-            final_pred, pred_uncert = ensemble_normals(
+            ensemble_kwargs = dict(ensemble_kwargs or {})
+            reduction = ensemble_kwargs.pop("reduction", "closest_image")
+            if reduction != "closest_image":
+                raise ValueError(
+                    f"Reduction '{reduction}' is not supported when returning latents. "
+                    "Use 'closest_image' to select a single ensemble member."
+                )
+            final_pred, pred_uncert, selected_idx = ensemble_normals(
                 target_preds,
-                **(ensemble_kwargs or {}),
+                reduction=reduction,
+                return_indices=True,
+                **ensemble_kwargs,
             )
+            assert selected_idx is not None
+            selected_idx_int = int(selected_idx.item())
+            final_latent = target_latents[
+                selected_idx_int : selected_idx_int + 1
+            ]  # [1,4,h,w]
         else:
             final_pred = target_preds
             pred_uncert = None
+            final_latent = target_latents
 
         # Resize back to original resolution
         if match_input_res:
@@ -307,6 +326,7 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
         # Convert to numpy
         final_pred = final_pred.squeeze()
         final_pred = final_pred.cpu().numpy()
+        final_latent = final_latent.squeeze().cpu().numpy()
         if pred_uncert is not None:
             pred_uncert = pred_uncert.squeeze().cpu().numpy()
 
@@ -321,6 +341,7 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
         return MarigoldNormalsOutput(
             normals_np=final_pred,
             normals_img=normals_img,
+            normals_latent=final_latent,
             uncertainty=pred_uncert,
         )
 
@@ -412,7 +433,7 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
         generator: Union[torch.Generator, None],
         show_pbar: bool,
         aspect_ratio: Optional[Union[float, torch.Tensor]] = None,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Perform a single prediction without ensembling.
 
@@ -428,7 +449,7 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
             aspect_ratio (`float` or `torch.Tensor`, *optional*):
                 Aspect ratio conditioning value(s) for the current batch.
         Returns:
-            `torch.Tensor`: Predicted targets.
+            Tuple[`torch.Tensor`, `torch.Tensor`]: Decoded normals and corresponding latent.
         """
         device = self.device
         rgb_in = rgb_in.to(device)
@@ -494,7 +515,7 @@ class MarigoldNormalsPipeline(DiffusionPipeline):
         norm = torch.norm(normals, dim=1, keepdim=True)
         normals /= norm.clamp(min=1e-6)  # [B,3,H,W]
 
-        return normals
+        return normals, target_latent
 
     def encode_rgb(self, rgb_in: torch.Tensor) -> torch.Tensor:
         """

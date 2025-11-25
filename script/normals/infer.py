@@ -183,6 +183,10 @@ if "__main__" == __name__:
 
     check_directory(output_dir)
     os.makedirs(output_dir, exist_ok=True)
+    output_dir_img = os.path.join(output_dir, "normals_png")
+    output_dir_latent = os.path.join(output_dir, "normals_latent")
+    os.makedirs(output_dir_img, exist_ok=True)
+    os.makedirs(output_dir_latent, exist_ok=True)
     logging.info(f"output dir = {output_dir}")
 
     # -------------------- Device --------------------
@@ -254,18 +258,32 @@ if "__main__" == __name__:
                 generator=generator,
             )
 
-            normals_pred: np.ndarray = pipe_out.normals_np
+            normals_img = pipe_out.normals_img
+            normals_latent: np.ndarray = pipe_out.normals_latent
 
             # Save predictions
             rgb_filename = batch["rgb_relative_path"][0]
             rgb_basename = os.path.basename(rgb_filename)
-            scene_dir = os.path.join(output_dir, os.path.dirname(rgb_filename))
-            if not os.path.exists(scene_dir):
-                os.makedirs(scene_dir)
-            rgb_basename_without_extension = os.path.splitext(rgb_basename)[0]
-            pred_basename = rgb_basename_without_extension + ".npy"
-            save_to = os.path.join(scene_dir, pred_basename)
-            if os.path.exists(save_to):
-                logging.warning(f"Existing file: '{save_to}' will be overwritten")
+            rel_dir = os.path.dirname(rgb_filename)
+            img_scene_dir = os.path.join(output_dir_img, rel_dir)
+            latent_scene_dir = os.path.join(output_dir_latent, rel_dir)
+            if not os.path.exists(img_scene_dir):
+                os.makedirs(img_scene_dir)
+            if not os.path.exists(latent_scene_dir):
+                os.makedirs(latent_scene_dir)
 
-            np.save(save_to, normals_pred)  # [3,H,W]
+            rgb_basename_without_extension = os.path.splitext(rgb_basename)[0]
+
+            img_save_path = os.path.join(img_scene_dir, rgb_basename_without_extension + ".png")
+            if os.path.exists(img_save_path):
+                logging.warning(
+                    f"Existing file: '{img_save_path}' will be overwritten"
+                )
+            normals_img.save(img_save_path)
+
+            latent_save_path = os.path.join(latent_scene_dir, rgb_basename_without_extension + ".npy")
+            if os.path.exists(latent_save_path):
+                logging.warning(
+                    f"Existing file: '{latent_save_path}' will be overwritten"
+                )
+            np.save(latent_save_path, normals_latent)  # [4,h,w]

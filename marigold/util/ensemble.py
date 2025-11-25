@@ -31,7 +31,7 @@
 import numpy as np
 import torch
 from functools import partial
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 from .image_util import get_tv_resample_method, resize_max_res
 
@@ -200,7 +200,11 @@ def ensemble_normals(
     normals: torch.Tensor,
     output_uncertainty: bool = False,
     reduction: str = "closest",
-) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    return_indices: bool = False,
+) -> Union[
+    Tuple[torch.Tensor, Optional[torch.Tensor]],
+    Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]],
+]:
     """
     Ensembles the normals maps represented by the `normals` tensor with expected shape `(B, 3, H, W)`, where B is
     the number of ensemble members for a given prediction of size `(H x W)`.
@@ -222,7 +226,7 @@ def ensemble_normals(
         raise ValueError(
             f"Expecting 4D tensor of shape [B,3,H,W]; got {normals.shape}."
         )
-    if reduction not in ("closest", "mean"):
+    if reduction not in ("closest", "closest_image", "mean"):
         raise ValueError(f"Unrecognized reduction method: {reduction}.")
 
     mean_normals = normals.mean(dim=0, keepdim=True)  # [1,3,H,W]
@@ -235,17 +239,52 @@ def ensemble_normals(
         sim_cos = sim_cos.clamp(-1, 1)  # required to avoid NaN in uncertainty with fp16
 
     uncertainty = None
-    if output_uncertainty:
-        uncertainty = sim_cos.arccos()  # [E,1,H,W]
-        uncertainty = uncertainty.mean(dim=0, keepdim=True) / np.pi  # [1,1,H,W]
-
     if reduction == "mean":
-        return mean_normals, uncertainty  # [1,3,H,W], [1,1,H,W]
+        indices = None
+        if output_uncertainty:
+            uncertainty = sim_cos.arccos()  # [E,1,H,W]
+            uncertainty = uncertainty.mean(dim=0, keepdim=True) / np.pi  # [1,1,H,W]
+        prediction = mean_normals
+        result = (prediction, uncertainty)
+        if return_indices:
+            return result + (indices,)
+        return result
 
+    if reduction == "closest_image":
+        if sim_cos is None:
+            sim_cos = (mean_normals * normals).sum(dim=1, keepdim=True)
+            sim_cos = sim_cos.clamp(-1, 1)
+
+        similarity = sim_cos.mean(dim=(2, 3))  # [E,1]
+        best_idx = similarity.argmax(dim=0).view(-1)  # [1]
+        closest_normals = normals[
+            best_idx[0] : best_idx[0] + 1
+        ]  # [1,3,H,W]
+
+        if output_uncertainty:
+            uncertainty = sim_cos[best_idx[0] : best_idx[0] + 1].arccos() / np.pi
+        else:
+            uncertainty = None
+
+        indices = best_idx.to(normals.device, dtype=torch.long).view(1)
+        result = (closest_normals, uncertainty)
+        if return_indices:
+            return result + (indices,)
+        return result
+
+    # reduction == "closest"
     closest_indices = sim_cos.argmax(dim=0, keepdim=True)  # [1,1,H,W]
     closest_indices = closest_indices.repeat(1, 3, 1, 1)  # [1,3,H,W]
     closest_normals = torch.gather(normals, 0, closest_indices)  # [1,3,H,W]
 
+    if output_uncertainty:
+        uncertainty = sim_cos.arccos()  # [E,1,H,W]
+        uncertainty = uncertainty.mean(dim=0, keepdim=True) / np.pi  # [1,1,H,W]
+    else:
+        uncertainty = None
+
+    if return_indices:
+        return closest_normals, uncertainty, closest_indices[0, :1]
     return closest_normals, uncertainty  # [1,3,H,W], [1,1,H,W]
 
 

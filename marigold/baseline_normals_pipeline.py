@@ -278,8 +278,10 @@ class BaselineNormalsPipeline(DiffusionPipeline):
 
         target = torch.randn(
             rgb_in.shape,
+            device=device,
+            dtype=self.dtype,
             generator=generator,
-        ).to(device=device, dtype=self.dtype)
+        )
 
         if show_pbar:
             iterable = tqdm(
