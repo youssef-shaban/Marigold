@@ -119,6 +119,11 @@ if "__main__" == __name__:
         default=None,
         help="Reproducibility seed. Set to `None` for randomized inference. Default: `None`",
     )
+    parser.add_argument(
+        "--use_aspect_ratio",
+        action="store_true",
+        help="Enable aspect-ratio conditioning when supported by the model.",
+    )
 
     args = parser.parse_args()
 
@@ -143,6 +148,7 @@ if "__main__" == __name__:
     resample_method = args.resample_method
 
     seed = args.seed
+    use_aspect_ratio = args.use_aspect_ratio
 
     logging.debug(f"Arguments: {args}")
 
@@ -237,6 +243,12 @@ if "__main__" == __name__:
         ):
             # Read input image
             input_image = batch["rgb_int"]
+            if use_aspect_ratio:
+                height = input_image.shape[-2]
+                width = input_image.shape[-1]
+                aspect_ratio_value = float(width) / float(height) if height != 0 else 1.0
+            else:
+                aspect_ratio_value = None
 
             # Random number generator
             if seed is None:
@@ -256,6 +268,7 @@ if "__main__" == __name__:
                 show_progress_bar=False,
                 resample_method=resample_method,
                 generator=generator,
+                aspect_ratio=aspect_ratio_value,
             )
 
             normals_img = pipe_out.normals_img

@@ -126,6 +126,11 @@ if "__main__" == __name__:
         action="store_true",
         help="Use Apple Silicon for faster inference (subject to availability).",
     )
+    parser.add_argument(
+        "--use_aspect_ratio",
+        action="store_true",
+        help="Enable aspect-ratio conditioning when supported by the model.",
+    )
 
     args = parser.parse_args()
 
@@ -153,6 +158,7 @@ if "__main__" == __name__:
     apple_silicon = args.apple_silicon
     if apple_silicon and 0 == batch_size:
         batch_size = 1  # set default batchsize
+    use_aspect_ratio = args.use_aspect_ratio
 
     # -------------------- Preparation --------------------
     # Output directories
@@ -249,6 +255,13 @@ if "__main__" == __name__:
         ):
             # Read input image
             input_image = Image.open(rgb_path).convert("RGB")
+            aspect_ratio_value = None
+            if use_aspect_ratio:
+                aspect_ratio_value = (
+                    float(input_image.width) / float(input_image.height)
+                    if input_image.height != 0
+                    else 1.0
+                )
 
             # Apply mask
             base_name = os.path.splitext(os.path.basename(rgb_path))[0]
@@ -274,6 +287,7 @@ if "__main__" == __name__:
             image_np = np.array(input_image)
             image_np[~mask_binary] = 0
             input_image = Image.fromarray(image_np)
+            # Aspect ratio remains the same after masking
 
             # Random number generator
             if seed is None:
@@ -293,6 +307,7 @@ if "__main__" == __name__:
                 show_progress_bar=True,
                 resample_method=resample_method,
                 generator=generator,
+                aspect_ratio=aspect_ratio_value,
             )
 
             normals_img: Image.Image = pipe_out.normals_img

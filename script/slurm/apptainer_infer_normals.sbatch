@@ -15,13 +15,14 @@ IMAGE_PATH=ykorny/marigold-normals:latest
 CODE_DIR=/projects/pointclouds/Marigold
 INPUT_DIR=/projects/pointclouds/input_images
 OUTPUT_DIR=/projects/pointclouds/predictions
-CHECKPOINT=/projects/pointclouds/ckpt/housediffusion
+CHECKPOINTS_DIR=/projects/pointclouds/ckpt/
 
 # Inference controls
 DENOISE_STEPS=15
 PROCESSING_RES=768
 ENSEMBLE_SIZE=1
 HALF_PRECISION=false
+USE_ASPECT_RATIO=true
 
 # Additional HuggingFace auth (optional)
 # export HF_HOME=/projects/pointclouds/.cache/huggingface
@@ -43,7 +44,7 @@ CONTAINER_INPUT=/work/input
 CONTAINER_OUTPUT=/work/output
 
 CMD_ARGS=(
-    --checkpoint "$CHECKPOINT"
+    --checkpoint "/ckpt/housediffusion"
     --input_rgb_dir "$CONTAINER_INPUT"
     --output_dir "$CONTAINER_OUTPUT"
     --denoise_steps "$DENOISE_STEPS"
@@ -53,6 +54,10 @@ CMD_ARGS=(
 
 if [ "$HALF_PRECISION" = "true" ]; then
     CMD_ARGS+=(--half_precision)
+fi
+
+if [ "$USE_ASPECT_RATIO" = "true" ]; then
+    CMD_ARGS+=(--use_aspect_ratio)
 fi
 
 # -------------------- Launch inference --------------------
