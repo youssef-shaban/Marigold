@@ -241,7 +241,7 @@ if "__main__" == __name__:
     # -------------------- Inference and saving --------------------
     with torch.no_grad():
         for batch in tqdm(
-            dataloader, desc=f"IID Inference on {dataset.disp_name}", leave=True
+            dataloader, desc=f"Normals Inference on {dataset.disp_name}", leave=True
         ):
             # Read input image
             input_image = batch["rgb_int"]

@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=mg-normals
 #SBATCH --partition=gen-part
-#SBATCH --qos=gpu1-32h
+#SBATCH --qos=scavenger
 #SBATCH --gpus=1
-#SBATCH --cpus-per-task=24
 #SBATCH --mem=128G
 #SBATCH --output=%x-%j.out
+#SBATCH --exclude=lse-hpcnode6
 
 # Paths you may need to adjust
 IMAGE_DIR=/projects/pointclouds/images

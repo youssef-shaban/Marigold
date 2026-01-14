@@ -1,5 +1,4 @@
-from .base_normals_dataset import BaseNormalsDataset
-from .base_depth_dataset import DatasetMode
+from .base_normals_dataset import BaseNormalsDataset, DatasetMode
 import os
 import random
 from PIL import Image

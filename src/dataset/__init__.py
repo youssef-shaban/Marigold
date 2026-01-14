@@ -29,64 +29,19 @@
 # --------------------------------------------------------------------------
 
 import os
-from typing import Union, List
+from typing import List, Union
 
-from .base_depth_dataset import (
-    BaseDepthDataset,
-    get_pred_name,  # noqa: F401
-    DatasetMode,
-)  # noqa: F401
-from .base_iid_dataset import BaseIIDDataset  # noqa: F401
-from .base_normals_dataset import BaseNormalsDataset  # noqa: F401
-from .diode_dataset import DIODEDepthDataset, DIODENormalsDataset
-from .eth3d_dataset import ETH3DDepthDataset
-from .hypersim_dataset import (
-    HypersimDepthDataset,
-    HypersimNormalsDataset,
-    HypersimIIDDataset,
-)
-from .ibims_dataset import IBimsNormalsDataset
-from .interiorverse_dataset import InteriorVerseNormalsDataset, InteriorVerseIIDDataset
-from .kitti_dataset import KITTIDepthDataset
-from .nyu_dataset import NYUDepthDataset, NYUNormalsDataset
-from .oasis_dataset import OasisNormalsDataset
-from .scannet_dataset import ScanNetDepthDataset, ScanNetNormalsDataset
-from .sintel_dataset import SintelNormalsDataset
-from .vkitti_dataset import VirtualKITTIDepthDataset
+from .base_normals_dataset import BaseNormalsDataset, DatasetMode  # noqa: F401
 from .aim2pc_dataset import AIM2PCNormalsDataset
 
 dataset_name_class_dict = {
-    "hypersim_depth": HypersimDepthDataset,
-    "vkitti_depth": VirtualKITTIDepthDataset,
-    "nyu_depth": NYUDepthDataset,
-    "kitti_depth": KITTIDepthDataset,
-    "eth3d_depth": ETH3DDepthDataset,
-    "diode_depth": DIODEDepthDataset,
-    "scannet_depth": ScanNetDepthDataset,
-    "hypersim_normals": HypersimNormalsDataset,
-    "interiorverse_normals": InteriorVerseNormalsDataset,
-    "sintel_normals": SintelNormalsDataset,
-    "ibims_normals": IBimsNormalsDataset,
-    "nyu_normals": NYUNormalsDataset,
-    "scannet_normals": ScanNetNormalsDataset,
-    "diode_normals": DIODENormalsDataset,
-    "oasis_normals": OasisNormalsDataset,
-    "interiorverse_iid": InteriorVerseIIDDataset,
-    "hypersim_iid": HypersimIIDDataset,
     "aim2pc_normals": AIM2PCNormalsDataset,
 }
 
 
 def get_dataset(
     cfg_data_split, base_data_dir: str, mode: DatasetMode, **kwargs
-) -> Union[
-    BaseDepthDataset,
-    BaseIIDDataset,
-    BaseNormalsDataset,
-    List[BaseDepthDataset],
-    List[BaseIIDDataset],
-    List[BaseNormalsDataset],
-]:
+) -> Union[BaseNormalsDataset, List[BaseNormalsDataset]]:
     if "mixed" == cfg_data_split.name:
         assert DatasetMode.TRAIN == mode, "Only training mode supports mixed datasets."
         dataset_ls = [

@@ -1,12 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=mg-infer
 #SBATCH --partition=gen-part
-#SBATCH --qos=gpu1-32h
+#SBATCH --qos=scavenger
 #SBATCH --gpus=1
-#SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --output=%x-%j.out
-
+#SBATCH --exclude=lse-hpcnode6
 # -------------------- User configuration --------------------
 # Update the paths below to match your cluster layout. You typically only
 # need to change INPUT_DIR and OUTPUT_DIR between runs.

@@ -163,7 +163,24 @@ if "__main__" == __name__:
             out_dir_run = os.path.join(output_dir, job_name)
         else:
             out_dir_run = os.path.join("./output", job_name)
-        os.makedirs(out_dir_run, exist_ok=False)
+
+        # Check if output dir already exists with a resumable checkpoint
+        # This handles Slurm scavenger QoS where jobs can be preempted and restarted
+        if os.path.exists(out_dir_run):
+            latest_ckpt = os.path.join(out_dir_run, "checkpoint", "latest")
+            trainer_state = os.path.join(latest_ckpt, "trainer.ckpt")
+            if os.path.exists(trainer_state):
+                logging.info(f"Found existing checkpoint, auto-resuming from: {latest_ckpt}")
+                resume_run = latest_ckpt
+                # Load config from existing run instead of the fresh config
+                cfg = OmegaConf.load(os.path.join(out_dir_run, "config.yaml"))
+            else:
+                raise FileExistsError(
+                    f"Output directory exists but no valid checkpoint found: {out_dir_run}. "
+                    "Delete the directory or provide a valid checkpoint with --resume_run."
+                )
+        else:
+            os.makedirs(out_dir_run, exist_ok=False)
 
     cfg_data = cfg.dataset
 
