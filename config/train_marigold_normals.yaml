@@ -6,11 +6,14 @@ base_config:
 - config/dataset_normals/dataset_vis.yaml
 - config/model_sdv2.yaml
 
+dataset:
+  multi_view: true
+
 pipeline:
   name: MarigoldNormalsPipeline
   kwargs:
     default_denoising_steps: 4
-    default_processing_resolution: 768
+    default_processing_resolution: 1024
 
 augmentation:
   color_jitter_p: 0.3
@@ -23,6 +26,7 @@ augmentation:
   jitter_contrast_factor: 0.5
   jitter_saturation_factor: 0.5
   jitter_hue_factor: 0.2
+  lr_flip_p: 0.0
 
 dataloader:
   num_workers: 8
@@ -37,7 +41,7 @@ trainer:
   name: MarigoldNormalsTrainer
   training_noise_scheduler:
     pretrained_path: stable-diffusion-2
-  init_seed: 2024  # use null to train w/o seeding
+  init_seed: 2025  # use null to train w/o seeding
   save_period: 50
   backup_period: 2000
   validation_period: 500
@@ -74,7 +78,7 @@ lr_scheduler:
 validation:
   denoising_steps: 4
   ensemble_size: 1
-  processing_res: 768
+  processing_res: 1024
   match_input_res: true
   resample_method: bilinear
   main_val_metric: mean_angular_error

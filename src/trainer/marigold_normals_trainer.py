@@ -33,6 +33,7 @@ import numpy as np
 import os
 import shutil
 import torch
+import wandb
 from PIL import Image
 from datetime import datetime
 from diffusers import DDPMScheduler, DDIMScheduler
@@ -560,6 +561,8 @@ class MarigoldNormalsTrainer:
                 data_loader=val_loader,
                 metric_tracker=self.val_metrics,
                 save_to_dir=vis_out_dir,
+                log_wandb_images=True,
+                wandb_max_samples=10,
             )
 
     @torch.no_grad()
@@ -568,6 +571,8 @@ class MarigoldNormalsTrainer:
         data_loader: DataLoader,
         metric_tracker: MetricTracker,
         save_to_dir: str = None,
+        log_wandb_images: bool = False,
+        wandb_max_samples: int = 10,
     ):
         self.model.to(self.device)
         metric_tracker.reset()
@@ -575,6 +580,14 @@ class MarigoldNormalsTrainer:
         # Generate seed sequence for consistent evaluation
         val_init_seed = self.cfg.validation.init_seed
         val_seed_ls = generate_seed_sequence(val_init_seed, len(data_loader))
+
+        wandb_pred_images = []
+        wandb_gt_images = []
+        log_wandb_images = (
+            log_wandb_images
+            and wandb.run is not None
+            and getattr(wandb.run, "mode", None) != "disabled"
+        )
 
         for i, batch in enumerate(
             tqdm(data_loader, desc=f"evaluating on {data_loader.dataset.disp_name}"),
@@ -650,6 +663,23 @@ class MarigoldNormalsTrainer:
                 ).astype(np.uint8)
                 gt_save_path = os.path.join(save_to_dir, f"{img_stem}_gt.png")
                 Image.fromarray(normals_gt_img).save(gt_save_path)
+
+                if log_wandb_images and len(wandb_pred_images) < wandb_max_samples:
+                    wandb_pred_images.append(
+                        wandb.Image(normals_pred_img, caption=f"{img_stem}_pred")
+                    )
+                    wandb_gt_images.append(
+                        wandb.Image(normals_gt_img, caption=f"{img_stem}_gt")
+                    )
+
+        if log_wandb_images and wandb_pred_images:
+            wandb.log(
+                {
+                    f"vis/{data_loader.dataset.disp_name}/pred": wandb_pred_images,
+                    f"vis/{data_loader.dataset.disp_name}/gt": wandb_gt_images,
+                },
+                step=self.effective_iter,
+            )
 
         return metric_tracker.result()
 

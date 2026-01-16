@@ -33,6 +33,8 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         **kwargs,
     ) -> None:
         self.apply_random_orientation = kwargs.pop("apply_random_orientation", True)
+        self.multi_view = kwargs.pop("multi_view", True)
+        self.multi_view_yaw_degs = kwargs.pop("multi_view_yaw_degs", [0.0, 90.0, 180.0, 270.0])
         super().__init__(
             mode=mode,
             filename_ls_path=filename_ls_path,
@@ -63,6 +65,12 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         self.max_cache_size = 20  # Maximum number of meshes to cache per worker (on CPU)
 
 
+    def _tile_2x2_views(self, top_left, top_right, bottom_left, bottom_right):
+        top = torch.cat([top_left, top_right], dim=2)
+        bottom = torch.cat([bottom_left, bottom_right], dim=2)
+        return torch.cat([top, bottom], dim=1)
+
+
     def _ensure_rasterizer(self):
         """Lazy initialization of rasterizer per worker with GPU acceleration."""
         if self.rasterizer_oblique is None:
@@ -89,7 +97,20 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
 
         rasters.update(self._load_rgb_data(rgb_path, mask_path, angle_deg if DatasetMode.RGB_ONLY != self.mode else 0.0))
         if DatasetMode.RGB_ONLY != self.mode:
-            rasters.update(self._render_normals(mesh_path, angle_deg))
+            if self.multi_view:
+                base_angle = angle_deg if self.apply_random_orientation else 0.0
+                normals_views = [
+                    self._render_normals(mesh_path, base_angle + yaw)
+                    for yaw in self.multi_view_yaw_degs
+                ]
+                rasters["normals"] = self._tile_2x2_views(
+                    normals_views[0],
+                    normals_views[1],
+                    normals_views[2],
+                    normals_views[3],
+                )
+            else:
+                rasters["normals"] = self._render_normals(mesh_path, angle_deg)
         
         
         return rasters, {"index": index, "rgb_relative_path": os.path.join("image", self.filenames[index])}
@@ -116,10 +137,15 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         final_rgb = np.array(final_rgb)
         final_rgb = np.transpose(final_rgb, (2, 0, 1)).astype(int)
 
-        final_rgb_norm = final_rgb / 255.0 * 2.0 - 1.0
-        return {"rgb_int": torch.from_numpy(final_rgb).int()
-        , "rgb_norm": torch.from_numpy(final_rgb_norm).float()
-        , "orig_aspect_ratio": orig_aspect_ratio
+        rgb_int = torch.from_numpy(final_rgb).int()
+        rgb_norm = (rgb_int.float() / 255.0) * 2.0 - 1.0
+        if self.multi_view:
+            rgb_int = self._tile_2x2_views(rgb_int, rgb_int, rgb_int, rgb_int)
+            rgb_norm = self._tile_2x2_views(rgb_norm, rgb_norm, rgb_norm, rgb_norm)
+        return {
+            "rgb_int": rgb_int,
+            "rgb_norm": rgb_norm,
+            "orig_aspect_ratio": orig_aspect_ratio,
         }
 
     def _render_normals(self, mesh_path, angle_deg):
@@ -180,7 +206,7 @@ class AIM2PCNormalsDataset(BaseNormalsDataset):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
-        return {"normals": torch.from_numpy(normals_oblique).float()}
+        return torch.from_numpy(normals_oblique).float()
 
 
 

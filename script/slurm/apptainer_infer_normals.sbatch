@@ -17,11 +17,12 @@ OUTPUT_DIR=/projects/pointclouds/predictions
 CHECKPOINTS_DIR=/projects/pointclouds/ckpt/
 
 # Inference controls
-DENOISE_STEPS=15
-PROCESSING_RES=768
+DENOISE_STEPS=5
+PROCESSING_RES=1024
 ENSEMBLE_SIZE=1
 HALF_PRECISION=false
 USE_ASPECT_RATIO=true
+MULTI_VIEW=true
 
 # Additional HuggingFace auth (optional)
 # export HF_HOME=/projects/pointclouds/.cache/huggingface
@@ -57,6 +58,10 @@ fi
 
 if [ "$USE_ASPECT_RATIO" = "true" ]; then
     CMD_ARGS+=(--use_aspect_ratio)
+fi
+
+if [ "$MULTI_VIEW" = "true" ]; then
+    CMD_ARGS+=(--multi_view)
 fi
 
 # -------------------- Launch inference --------------------

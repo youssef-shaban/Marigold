@@ -48,6 +48,16 @@ EXTENSION_LIST = [".jpg", ".jpeg", ".png"]
 MASK_EXTENSION_LIST = [".png", ".jpg", ".jpeg"]
 
 
+def tile_image_2x2(image: Image.Image) -> Image.Image:
+    width, height = image.size
+    tiled = Image.new("RGB", (width * 2, height * 2))
+    tiled.paste(image, (0, 0))
+    tiled.paste(image, (width, 0))
+    tiled.paste(image, (0, height))
+    tiled.paste(image, (width, height))
+    return tiled
+
+
 if "__main__" == __name__:
     logging.basicConfig(level=logging.INFO)
 
@@ -131,6 +141,11 @@ if "__main__" == __name__:
         action="store_true",
         help="Enable aspect-ratio conditioning when supported by the model.",
     )
+    parser.add_argument(
+        "--multi_view",
+        action="store_true",
+        help="Tile the masked input 2x2 for multi-view inference.",
+    )
 
     args = parser.parse_args()
 
@@ -159,6 +174,7 @@ if "__main__" == __name__:
     if apple_silicon and 0 == batch_size:
         batch_size = 1  # set default batchsize
     use_aspect_ratio = args.use_aspect_ratio
+    multi_view = args.multi_view
 
     # -------------------- Preparation --------------------
     # Output directories
@@ -260,12 +276,6 @@ if "__main__" == __name__:
             # Read input image
             input_image = Image.open(rgb_path).convert("RGB")
             aspect_ratio_value = None
-            if use_aspect_ratio:
-                aspect_ratio_value = (
-                    float(input_image.width) / float(input_image.height)
-                    if input_image.height != 0
-                    else 1.0
-                )
 
             # Apply mask
             base_name = os.path.splitext(os.path.basename(rgb_path))[0]
@@ -292,6 +302,16 @@ if "__main__" == __name__:
             image_np[~mask_binary] = 0
             input_image = Image.fromarray(image_np)
             # Aspect ratio remains the same after masking
+
+            if multi_view:
+                input_image = tile_image_2x2(input_image)
+
+            if use_aspect_ratio:
+                aspect_ratio_value = (
+                    float(input_image.width) / float(input_image.height)
+                    if input_image.height != 0
+                    else 1.0
+                )
 
             # Random number generator
             if seed is None:

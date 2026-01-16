@@ -183,6 +183,7 @@ if "__main__" == __name__:
             os.makedirs(out_dir_run, exist_ok=False)
 
     cfg_data = cfg.dataset
+    multi_view = cfg_data.get("multi_view", True)
 
     # Other directories
     out_dir_ckpt = os.path.join(out_dir_run, "checkpoint")
@@ -294,6 +295,7 @@ if "__main__" == __name__:
         base_data_dir=base_data_dir,
         mode=DatasetMode.TRAIN,
         augmentation_args=cfg.augmentation,
+        multi_view=multi_view,
     )
     logging.debug("Augmentation: ", cfg.augmentation)
     if "mixed" == cfg_data.train.name:
@@ -336,6 +338,7 @@ if "__main__" == __name__:
             _val_dict,
             base_data_dir=base_data_dir,
             mode=DatasetMode.EVAL,
+            multi_view=multi_view,
         )
         _val_loader = DataLoader(
             dataset=_val_dataset,
@@ -354,6 +357,7 @@ if "__main__" == __name__:
             _vis_dict,
             base_data_dir=base_data_dir,
             mode=DatasetMode.EVAL,
+            multi_view=multi_view,
         )
         _vis_loader = DataLoader(
             dataset=_vis_dataset,
