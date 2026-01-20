@@ -58,6 +58,14 @@ def tile_image_2x2(image: Image.Image) -> Image.Image:
     return tiled
 
 
+def get_pil_resample(method: str) -> int:
+    if method == "bicubic":
+        return Image.BICUBIC
+    if method == "nearest":
+        return Image.NEAREST
+    return Image.BILINEAR
+
+
 if "__main__" == __name__:
     logging.basicConfig(level=logging.INFO)
 
@@ -276,6 +284,12 @@ if "__main__" == __name__:
             # Read input image
             input_image = Image.open(rgb_path).convert("RGB")
             aspect_ratio_value = None
+            if use_aspect_ratio:
+                aspect_ratio_value = (
+                    float(input_image.width) / float(input_image.height)
+                    if input_image.height != 0
+                    else 1.0
+                )
 
             # Apply mask
             base_name = os.path.splitext(os.path.basename(rgb_path))[0]
@@ -303,15 +317,12 @@ if "__main__" == __name__:
             input_image = Image.fromarray(image_np)
             # Aspect ratio remains the same after masking
 
+            input_image = input_image.resize(
+                (512, 512), resample=get_pil_resample(resample_method)
+            )
+
             if multi_view:
                 input_image = tile_image_2x2(input_image)
-
-            if use_aspect_ratio:
-                aspect_ratio_value = (
-                    float(input_image.width) / float(input_image.height)
-                    if input_image.height != 0
-                    else 1.0
-                )
 
             # Random number generator
             if seed is None:
