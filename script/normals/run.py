@@ -58,6 +58,18 @@ def tile_image_2x2(image: Image.Image) -> Image.Image:
     return tiled
 
 
+def pad_to_square(image: Image.Image, fill_color=(0, 0, 0)) -> Image.Image:
+    width, height = image.size
+    if width == height:
+        return image
+    target_size = max(width, height)
+    padded = Image.new("RGB", (target_size, target_size), fill_color)
+    left = (target_size - width) // 2
+    top = (target_size - height) // 2
+    padded.paste(image, (left, top))
+    return padded
+
+
 def get_pil_resample(method: str) -> int:
     if method == "bicubic":
         return Image.BICUBIC
@@ -317,9 +329,7 @@ if "__main__" == __name__:
             input_image = Image.fromarray(image_np)
             # Aspect ratio remains the same after masking
 
-            input_image = input_image.resize(
-                (512, 512), resample=get_pil_resample(resample_method)
-            )
+            input_image = pad_to_square(input_image)
 
             if multi_view:
                 input_image = tile_image_2x2(input_image)
